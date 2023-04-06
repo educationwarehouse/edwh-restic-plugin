@@ -171,7 +171,7 @@ class Repository:
             in_stream=io.StringIO(message),
         )
 
-    def backup(self, c, verbose: bool, target: str, verb: str, message: str):
+    def backup(self, c, verbose: bool, target: str, message: str):
         """
         Backs up the specified target.
 
@@ -181,9 +181,9 @@ class Repository:
         - verb (str): The verb associated with the backup.
         - message (str): The message to be associated with the backup.
         """
-        self.execute_files(c, verbose, target, verb, message)
+        self.execute_files(c, verbose, target, "backup", message)
 
-    def restore(self, c, verbose: bool, target: str, verb: str, snapshot: str = "latest"):
+    def restore(self, c, verbose: bool, target: str, snapshot: str = "latest"):
         """
             Restores the specified target using the specified snapshot or the latest if None is given.
 
@@ -193,7 +193,7 @@ class Repository:
             - verb (str): The verb associated with the restore.
             - snapshot (str, optional): The snapshot to be used for the restore. Defaults to "latest".
             """
-        self.execute_files(c, verbose, target, verb, None, snapshot)
+        self.execute_files(c, verbose, target, "restore", None, snapshot)
 
     def check(self, c):
         """
@@ -671,8 +671,7 @@ def configure(c, connection_choice=None, restichostname=None):
 @task
 def backup(c, target="", connection_choice=None, message=None, verbose=False):
     """
-    Performs a backup operation using restic, a backup program that encrypts and compresses data
-    and stores it to a repository. The repository can be on a local or remote file system or in a cloud storage.
+    Performs a backup operation using restic on a local or remote/cloud file system.
 
     Args:
         target (str): The path of the file or directory to backup. Defaults to an empty string.
@@ -701,7 +700,7 @@ def backup(c, target="", connection_choice=None, message=None, verbose=False):
     # --exclude-larger-than 'size', Specified once to excludes files larger than the given size.
     # Please see 'restic help backup' for more specific information about each exclude option.
 
-    cli_repo(c, connection_choice).backup(c, verbose, target, "backup", message)
+    cli_repo(c, connection_choice).backup(c, verbose, target, message)
 
 
 @task
@@ -713,10 +712,11 @@ def restore(
         verbose=False
 ):
     """
+    The restore function restores the latest backed-up files by default and puts them in a restore folder.
+
     IMPORTANT: please provide -t for the path where the restore should go. Also remember to include -c for the service
     where the backup is stored.
 
-    The restore function restores the latest backed-up files by default and puts them in a restore folder.
     :param connection_choice: the service where the files are backed up, e.g., 'local' or 'openstack'.
     :param snapshot: the ID where the files are backed up, default value is 'latest'.
     :param target: the location where the backup should be restored.
@@ -747,7 +747,7 @@ def restore(
         for volume_name in volumes_to_remove:
             c.run("docker volume rm " + volume_name)
 
-    cli_repo(c, connection_choice).restore(c, verbose, target, "restore", snapshot)
+    cli_repo(c, connection_choice).restore(c, verbose, target, snapshot)
     # print("`inv up` to restart the services.")
 
 
