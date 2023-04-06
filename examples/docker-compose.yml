@@ -1,0 +1,42 @@
+#note: dit is een leidraad, per app die je de lucht in wil brengen kunnen er 
+#nog meer dingen toegevoegd (moeten) worden. Denk hierbij bijv. aan mounts en etra config.
+
+version: '3.8'
+networks:
+  broker:
+    external:
+      # connect w/ traefik:
+      name: broker
+
+volumes:
+  #Geef hier volumes op die door docker moeten worden opgeslagen. 
+  db_volumes:
+
+services:
+  Name_of_service:
+    image: name_of_service:latest #is meestal ook te vinden in de docker-compose
+    restart: unless-stopped
+    depends_on: #kan een andere service nodig zijn om te werken, denk aan een db
+    environment:
+      ENV_VARIABLE1: $(DEFAULT1)
+      ENV_VARIABLE2: $(DEFAULT2)
+    volumes:
+      - db_volumes:/path/to/db/internally
+      - ./logs:/path/to/logs/internally
+    command: ["command", "to run", "on startup"]
+    expose:
+      - 1337 #voer hier een random ongebruikte poort in waarmee traefik kan communiceren    
+    labels:
+      - "traefik.enable=true"
+      # https only
+      - "traefik.http.routers.n8n-secure.rule=Host(`$(NAME_SERVICE).${HOSTINGDOMAIN}`)"
+      - "traefik.http.routers.n8n-secure.tls=true"
+      - "traefik.http.routers.n8n-secure.entrypoints=web-secured"
+      - "traefik.http.routers.n8n-secure.tls.certresolver=letsencrypt"
+      - "traefik.docker.network=broker"
+      #De hoofdservice hoeft alleen deze labels te krijgen. Zorg ervoor de hoofdservice
+      #dan ook alleen op het netwerk 'broker' staat. 
+    networks:
+      - broker
+      - default
+
