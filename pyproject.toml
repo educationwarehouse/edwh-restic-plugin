@@ -24,7 +24,12 @@ classifiers = [
   "Programming Language :: Python :: Implementation :: CPython",
   "Programming Language :: Python :: Implementation :: PyPy",
 ]
-dependencies = []
+dependencies = [
+ 'invoke'
+]
+
+[project.entry-points."edwh.tasks"]
+restic = "edwh_restic_plugin.tasks"
 
 [project.urls]
 Documentation = "https://github.com/unknown/edwh-restic-plugin#readme"
