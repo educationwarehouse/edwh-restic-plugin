@@ -1,15 +1,16 @@
+from collections import defaultdict, OrderedDict
+
 import invoke
-from invoke import task
+from invoke import task, run, Result, Context
+
 import datetime
 import io
 import os
+from pathlib import Path
 import re
 import sys
 import typing
 import json
-from pathlib import Path
-from collections import defaultdict, OrderedDict
-
 
 # the path where the restic command is going to be executed
 DEFAULT_BACKUP_FOLDER = Path("captain-hooks")
@@ -593,12 +594,12 @@ def backup(c, target="", connection_choice=None, message=None, verbose=False):
 
 @task
 def restore(
-        c,
-        connection_choice=None,
-        snapshot="latest",
-        target="",
-        verbose=False,
-) -> None:
+    c,
+    connection_choice=None,
+    snapshot="latest",
+    target="",
+    verbose=False
+):
     """
     IMPORTANT: please fill in -t for a path where the restore can go. Also remember to put in a -c for at what service
     you stored the backup.
@@ -640,7 +641,7 @@ def restore(
 
 
 @task(iterable=['tag'])
-def snapshots(c, connection_choice=None, tag=None, n=1) -> None:
+def snapshots(c, connection_choice=None, tag=None, n=1):
     """
     With this je can see per repo which repo is made when and where, the repo-id can be used at inv restore as an option
     :param c: invoke
