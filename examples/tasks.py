@@ -1,7 +1,7 @@
 from collections import defaultdict, OrderedDict
 
 import invoke
-from invoke import task, run, Result, Context
+from invoke import task
 
 import datetime
 import io
@@ -22,15 +22,6 @@ _dotenv_settings = {}
 
 
 class Repository:
-
-    # _targets: a list of file and directory paths that should be included in the backup.
-    # _excluded: a list of file and directory paths that should be excluded from the backup.
-    # _stream_backup_cmd: a command line string that will be used to create a backup of a stream.
-    # _stream_restore_cmd: a command line string that will be used to restore a backup from a stream.
-    # _stream_filename: the name of the file where the stream is saved.
-    # _should_exist: the path of a file that should exist.
-
-
     # _targets: a list of file and directory paths that should be included in the backup.
     _targets = [".env", "./backup"]
     # _excluded: a list of file and directory paths that should be excluded from the backup.
@@ -50,59 +41,80 @@ class Repository:
     _stream_backup_cmd = "docker-compose run -T  --rm pg-0 pg_dump --format=p --dbname=backend --clean --create -h pgpool -U postgres"
     # _stream_restore_cmd: a command line string that will be used to restore a backup from a stream.
     _stream_restore_cmd = "cat - > ./migrate/data/database_to_restore.sql"
-    # naam van de stream, dus waar die in zit
+    # _stream_filename: the name of the file where the stream is saved.
     _stream_filename = "/postgres-backend-database.sql"
+    # _should_exist: the path of a file that should exist.
     _should_exist = "/.env"
 
     def __init__(self) -> None:
         super().__init__()
         self._restichostname = read_dotenv(DOTENV).get(
             "RESTICHOSTNAME"
-        )  # or None als niet voorkomt
+        )  # or None if it is not there
 
     @property
     def uri(self):
-        """Return de prefix nodig voor restic om het protocol aan te geven, bijvoorbeeld sftp:hostname:"""
-        raise NotImplementedError("Prefix onbekend op base class")
+        """Return the prefix required for restic to indicate the protocol, for example sftp:hostname:"""
+        raise NotImplementedError("Prefix unknown in base class")
 
     def setup(self):
-        """Zorg ervoor dat de settings in de .env file staan"""
+        """Ensure that the settings are in the .env file"""
         raise NotImplementedError("Setup undefined")
 
     def prepare_for_restic(self, c):
-        """No environment variables need be defined for local"""
+        """No environment variables need to be defined for local"""
         raise NotImplementedError("Prepare for restic undefined")
 
     def configure(self, c):
+        """Configure the backup environment variables."""
         self.prepare_for_restic(c)
         print("configure")
-        # eerst ervoor zorgen dat restic up-to-date is
+        # First, make sure restic is up-to-date
         c.run("sudo restic self-update", hide=True, warn=True)
-        # Dit is de command die gebruik wordt om de omgevingsvariabelen goed te configureren.
+        # This is the command used to configure the environment variables properly.
         c.run(f"restic init --repository-version 2 -r {self.uri}")
 
     @property
     def hostarg(self):
+        """Return the host argument for restic command."""
         return f" --host {self._restichostname} " if self._restichostname else ""
 
     @property
     def targets(self):
-        # Hierin staat de target
+        """Return the target files and directories for the backup."""
         return " ".join(self._targets)
 
     @property
     def excluded(self):
-        # wat moet er uitgesloten worden?
+        """Return the excluded files and directories for the backup.
+        Here comes the files that are going to be excluded"""
         return " --exclude ".join(self._excluded)
 
     def get_snapshot_from(self, stdout: str):
+        """
+        Parses the stdout from a Restic command to extract the snapshot ID.
+
+        Args:
+        - stdout (str): The stdout output from a Restic command.
+
+        Returns:
+        - The snapshot ID as a string.
+                """
         snapshots_ids = re.findall(r"snapshot (.*?) saved", stdout)
         return snapshots_ids[-1] if snapshots_ids else None
 
     def get_scripts(self, target, verb):
-        print("target =", target, "verb =", verb)
+        """Retrieves the scripts that contain a restic command and returns them to 'execute_files' to execute them.
+
+        Args:
+        - target (str): target is a string that specifies the target of the backup. This can be a file, stream, directory,
+        or any other object that needs to be backed up.
+        - verb (str): is also a string that specifies the action to be performed on the target.
+        For example, the verb could be "backup" or "restore". The verb is used in combination with the target to
+        search for the backup script files that contain the restic command.
+        """
+        # get files by verb and target. EXAMPLE backup_files_*.sh
         files = []
-        print(verb + "_" + target + "*")
         for file in DEFAULT_BACKUP_FOLDER.glob(verb + "_" + target + "*"):
             files.append(str(file))
 
@@ -114,15 +126,32 @@ class Repository:
         return files
 
     def execute_files(self, c, verbose: bool, target: str, verb: str, message: str = None, snapshot: str = "latest"):
+        """
+        Executes the backup scripts retrieved by 'get_scripts' function.
+
+        Args:
+        - verbose (bool): A flag indicating whether to display verbose output.
+        - target (str): The target of the backup.
+        - verb (str): The verb associated with the backup.
+        - message (str, optional): The message to be associated with the backup.
+        If not provided, the current local time is used. Defaults to None.
+        - snapshot (str, optional): The snapshot to be used for the backup. Defaults to "latest".
+        """
         self.prepare_for_restic(c)
+
+        # set snapshot available in enviroment for sh files
         os.environ["SNAPSHOT"] = snapshot
 
+        # Here you can make a message that you will see in the snapshots list
+        # so you know what's in the backup.
         if message is None:
+            # If no message is provided, use the current local time as the backup message
             message = str(datetime.datetime.now()) + " localtime"
 
         # set MSG in envirement for sh files
         os.environ["MSG"] = message
 
+        # get files by target and verb. see self.get_scripts for more info
         files = self.get_scripts(target, verb)
 
         snapshots_created = []
@@ -143,23 +172,52 @@ class Repository:
         )
 
     def backup(self, c, verbose: bool, target: str, verb: str, message: str):
+        """
+        Backs up the specified target.
+
+        Args:
+        - verbose (bool): A flag indicating whether to display verbose output.
+        - target (str): The target of the backup.
+        - verb (str): The verb associated with the backup.
+        - message (str): The message to be associated with the backup.
+        """
         self.execute_files(c, verbose, target, verb, message)
 
     def restore(self, c, verbose: bool, target: str, verb: str, snapshot: str = "latest"):
+        """
+            Restores the specified target using the specified snapshot or the latest if None is given.
+
+            Args:
+            - verbose (bool): A flag indicating whether to display verbose output.
+            - target (str): The target of the restore.
+            - verb (str): The verb associated with the restore.
+            - snapshot (str, optional): The snapshot to be used for the restore. Defaults to "latest".
+            """
         self.execute_files(c, verbose, target, verb, None, snapshot)
 
     def check(self, c):
+        """
+        Checks the integrity of the backup repository.
+        """
         self.prepare_for_restic(c)
-        # Dit is de command die gebruik wordt om een check uit te voeren.
-        print("check")
         c.run(f"restic {self.hostarg} -r {self.uri} check --read-data")
 
     def snapshot(self, c, tags: list = None, n=2):
+        """
+        a list of all the backups with a message
+
+        Args:
+        - tags (list, optional): A list of tags to use for the snapshot. Defaults to None.
+        - n (int, optional): The number of latest snapshots to show. Defaults to 2.
+
+        Returns:
+        None. This function only prints the output to the console.
+        """
+        # choose to see only the files or the stream snapshots
         if tags is None:
             tags = ["files", "stream"]
 
         self.prepare_for_restic(c)
-        # Dit is de command die gebruik wordt om een snapshot uit te voeren.
         tags = "--tag " + " --tag ".join(tags) if tags else ""
         stdout = c.run(
             f"restic {self.hostarg} -r {self.uri} snapshots --latest {n} {tags} -c",
@@ -180,7 +238,6 @@ class Repository:
             tag_name = possible_tag_names[0]
             if tag_name not in ["message"]:
                 continue
-            # print(snapshot, tag_name)
             for _, is_message_for_snapshot_id in re.findall(
                     rf"\n{snapshot}.*(\n\s+(.*)\n)+", stdout
             ):
@@ -189,7 +246,6 @@ class Repository:
                 )
 
         for snapshot, message_snapshots in message_snapshot_per_snapshot.items():
-            # print de inhoud van de message  die hoort bij deze snapshot
             restore_output = c.run(
                 f"restic {self.hostarg} -r {self.uri} dump {message_snapshots[0]} --tag message message",
                 hide=True,
@@ -201,13 +257,10 @@ class Repository:
             )
         print(stdout)
 
-    def new_snapshots(self, c, tags: list = None, n=2, messages=True):
-        tags = "--tag " + " --tag ".join(tags) if tags else ""
-
 
 class LocalRepository(Repository):
     def setup(self):
-        """Zorg ervoor dat de settings in de .env file staan"""
+        """Ensure the required settings are defined in the .env file."""
         self.name = check_env(
             DOTENV,
             "LOCAL_NAME",
@@ -313,7 +366,7 @@ class B2Repository(Repository):
             DOTENV,
             "B2_BUCKETNAME",
             default=None,
-            comment="voer hier de juiste bucketname in.",
+            comment="Use the correct bucketname (directory above repo name",
         )
         check_env(
             DOTENV,
@@ -564,6 +617,11 @@ def check_env(
         return env[key]
 
 
+# the order in which the backup will be saved
+# Swift is the most secure for us, because of the keys
+# B2 is also very secure, only less
+# SFTP is the least secure, if were talking about remote saving
+# Local can be a good option, but if your pc got broken, you have lost your backup
 CONNECTION_CLASS_MAP = OrderedDict(
     os=SwiftRepository,
     b2=B2Repository,
@@ -583,7 +641,7 @@ def cli_repo(c, connection_choice=None, restichostname=None):
     if restichostname:
         set_env_value(DOTENV, "RESTICHOSTNAME", restichostname)
     if connection_choice is None:
-        #  zoek de meest belangrijke backup mogelijk op als default.
+        # search for the most important backup and use it as default
         for connection_choice in CONNECTION_CLASS_MAP.keys():
             connection_lowercase = connection_choice.lower()
             if connection_choice.upper() + "_NAME" in env:
@@ -591,7 +649,7 @@ def cli_repo(c, connection_choice=None, restichostname=None):
     else:
         connection_lowercase = connection_choice.lower()
     repoclass = CONNECTION_CLASS_MAP[connection_lowercase]
-    print("Gebruikt connectie: ", connection_lowercase)
+    print("Use connection: ", connection_lowercase)
     repo = repoclass()
     repo.setup()
     return repo
@@ -604,9 +662,9 @@ def configure(c, connection_choice=None, restichostname=None):
     restichostname: which hostname to force for restic, or blank for default.
     """
 
-    # Er is gekozen om voor elke repository een hoofdpad aan te maken genaamd 'backups'.
-    # Deze kan eventueel veranderd en weggehaald worden indien gewenst.
-    # Een password wordt slechts bij een aantal fucnties meegegeven.
+    # It has been decided to create a main path called 'backups' for each repository.
+    # This can be changed or removed if desired.
+    # A password is only passed with a few functions.
     cli_repo(c, connection_choice, restichostname).configure(c)
 
 
@@ -632,7 +690,7 @@ def backup(c, target="", connection_choice=None, message=None, verbose=False):
     # It can be replaced with the desired path over which restic should perform a backup.
     # The option --verbose provides more information about the backup that is made.It can be removed if desired.
 
-    # Door gebruik te maken van toevoegingen kan specifiek weergegeven worden wat meegenomen moet worden:
+    # By using additions, it is possible to specify what should be included:
     # --exclude ,Specified one or more times to exclude one or more items.
     # --iexclude, Same as --exclude but ignores the case of paths.
     # --exclude-caches, Specified once to exclude folders containing this special file.
@@ -648,57 +706,55 @@ def backup(c, target="", connection_choice=None, message=None, verbose=False):
 
 @task
 def restore(
-    c,
-    connection_choice=None,
-    snapshot="latest",
-    target="",
-    verbose=False
+        c,
+        connection_choice=None,
+        snapshot="latest",
+        target="",
+        verbose=False
 ):
     """
-    IMPORTANT: please fill in -t for a path where the restore can go. Also remember to put in a -c for at what service
-    you stored the backup.
+    IMPORTANT: please provide -t for the path where the restore should go. Also remember to include -c for the service
+    where the backup is stored.
 
-    the restore function restores the latest backup-ed files by default and puts it into a restore folder.
-    :param c: invoke
-    :param connection_choice: service where the files are backed op, think about local or openstack
-    :param snapshot: by default snapshot is latest, snapshot is the id where the files are backed-up
-    :param target: location where the backup gets dumped
-    :param verbose: logs(inv restore -v)
+    The restore function restores the latest backed-up files by default and puts them in a restore folder.
+    :param connection_choice: the service where the files are backed up, e.g., 'local' or 'openstack'.
+    :param snapshot: the ID where the files are backed up, default value is 'latest'.
+    :param target: the location where the backup should be restored.
+    :param verbose: display verbose logs (inv restore -v).
     :return: None
     """
-    # Bij restore is --target de locatie waarin de restore geplaatst mag worden, --path is het bestand/pad die uit de
-    # repository gehaald mag worden. 'which_restore' is hierbij een input van de gebruiker, om zo een eerdere restore
-    # mogelijk te maken (default = latest).
-    # stoppen van de postgres services
+    # For restore, --target is the location where the restore should be placed, --path is the file/path that should be
+    # retrieved from the repository.
+    # 'which_restore' is a user input to enable restoring an earlier backup (default = latest).
+    # Stop the postgres services.
     c.run("docker-compose stop -t 1 pg-0 pg-1 pgpool", warn=True, hide=True)
 
-    # opvragen welke volumes gebruikt worden
+    # Get the volumes that are being used.
     docker_inspect: invoke.Result = c.run(
         "docker inspect pg-0 pg-1", hide=True, warn=True
     )
     if docker_inspect.ok:
-        # alleen als ok, want als pg-0 en pg-1 niet bestaan, is dit er niet, en hoeft er ook niets verwijderd te worden.
+        # Only if ok, because if pg-0 and pg-1 do not exist, this does not exist either, and nothing needs to be removed
         inspected = json.loads(docker_inspect.stdout)
-        te_verwijderen_volumes = []
+        volumes_to_remove = []
         for service in inspected:
             for mount in service["Mounts"]:
                 if mount["Type"] == "volume":
-                    te_verwijderen_volumes.append(mount["Name"])
-        # containers verwijderen, voordat een volume verwijderd kan worden
+                    volumes_to_remove.append(mount["Name"])
+        # Remove the containers before a volume can be removed.
         c.run("docker-compose rm -f pg-0 pg-1")
-        # volumes verwijderen
-        for volume_name in te_verwijderen_volumes:
+        # Remove the volumes.
+        for volume_name in volumes_to_remove:
             c.run("docker volume rm " + volume_name)
 
     cli_repo(c, connection_choice).restore(c, verbose, target, "restore", snapshot)
-    # print("`inv up` om de services te herstarten ")
+    # print("`inv up` to restart the services.")
 
 
 @task(iterable=['tag'])
 def snapshots(c, connection_choice=None, tag=None, n=1):
     """
     With this je can see per repo which repo is made when and where, the repo-id can be used at inv restore as an option
-    :param c: invoke
     :param connection_choice: service
     :param tag: files, stream ect
     :param n: amount of snapshot to view, default=1(latest)
