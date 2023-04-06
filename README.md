@@ -7,14 +7,16 @@
 
 **Table of Contents**
 
-- [Installation](#installation)
-- [License](#license)
-- [backup](#resticbackup)
+- [Installation](#installing-the-plugin)
+- [what is restic](#what-is-restic)
+- [configuring edwh restic](#configuring-edwh-restic)
+- [backup](#using-ew-resticbackup)
 - [restore](#resticrestore)
 - [snapshots](#resticsnapshots)
 - [configure](#resticconfigure)
-
-## Installation
+- [License](#license)
+- 
+## Installing the plugin
 
 ```console
 pip install edwh-restic-plugin
@@ -25,16 +27,17 @@ But probably you want to install the whole `edwh` package:
 ```console
 pipx install edwh[plugins,omgeving]
 ```
+
 ## What is Restic?
 Restic is a program that automatically stores backups in a separate repository, securing them with a password and compressing them. 
 There are multiple options for storing backups, including locally on the same host, SFTP to a remote host,
 and remotely to various systems and providers such as Amazon, REST, Minio, Wasabi, Alibaba Cloud, Openstack, Backblaze, 
 Azure, Google, and rclone.
 
-## restic usages for edwh
+## Configuring `edwh restic.*`
 For EDWH, they use local storage, SFTP, Backblaze, and Openstack.
 
-## Creating a new repository
+### Creating a new repository
 To create a new repository, you need the local path to the folder where the backup should be stored,
 or an SSH connection for SFTP with a path to the folder where the backup should be stored. 
 It's important to note that SFTP servers may close the connection if they don't receive data, 
@@ -46,35 +49,23 @@ For Openstack, you need to specify which Keystone to use, environment variables 
 and the name of the container. 
 Restic can also work with an OpenStack RC file.### Commando:
 
-### local:
+#### local:
 > restic init –repo /pad/naar/repo
 
-### SFTP:
+#### SFTP:
 > restic -r sftp:user@host:/pad/naar/repo init
 
-### Backblaze:
+Note that SFTP servers may close the connection if they don't receive data, which can happen if 
+Restic is processing large amounts of unchanged data. To avoid this issue, you can use the 
+option `ServerAliveInterval 60` and `ServerAliveCountMax 240` in the SSH config.
+
+#### Backblaze:
 > restic -r b2:bucketname:/pad/naar/repo init
 
-### Openstack:
+#### Openstack:
 > restic -r swift:container_name:/repo init
 
-## restic.backup
-To backup a file use the ``` inv backup ``` command
-
-**arguments for the inv backup**
-- connection_choice=SERVICE
-- snapshot = "latest" by default, see [snapshots](#resticsnapshots) for more info
-- message | send a message with the backup, default is datetime.localtime()
-- verbose | print logs
-
-**Requirements:**
-
-- For local storage, the path to the folder where the backup should be stored.
-- For SFTP, an SSH connection with public/private key in an agent or via SSH config, and the path to the folder where the backup should be stored. Note that SFTP servers may close the connection if they don't receive data, which can happen if Restic is processing large amounts of unchanged data. To avoid this issue, you can use the option ServerAliveInterval 60 & ServerAliveCountMax 240 in the SSH config.
-- For Backblaze, you need a B2 account ID and key, as well as the name of the bucket.
-- For Openstack, you need to specify which Keystone to use, environment variables (as shown in the image), and the name of the container. Restic can also work with an OpenStack RC file.
-- For all of the above requirements, you also need to specify what needs to be backed up.
-- example for backing up files without using streams:
+### Working with `captain-hooks` shell scripts
 
 example for backing up files using no stream
 >restic $HOST -r $URI backup --tag files *.sh
@@ -88,6 +79,26 @@ example for backing up files using streams:
 **variables you can use in the restore sh file**
 - $HOST
 - $URI
+
+
+## Using `ew restic.backup`
+To backup a file use the `inv backup` command
+
+Possible arguments for `inv backup`:
+- **connection_choice**: connection to use for access to the repository. Can be OS, SFTP, B2, or 
+  local.
+- **snapshot**: "latest" by default, see [snapshots](#resticsnapshots) for more information
+- **message**: store a descriptive message with the backup, default is `datetime.localtime()`
+- **verbose**: add verbosity, printing more debug information while processing the activity. 
+
+**Requirements:**
+
+- For local storage a path to the folder where the backup should be stored is required.
+- For SFTP, an SSH connection with public/private key in an agent or via SSH config, and the path to the folder where the backup should be stored. 
+- For Backblaze, you need a B2 account-ID and key, as well as the name of the bucket to store 
+  the backup. 
+- For Openstack, you need to specify which Keystone to use, environment variables (as shown in the image), and the name of the container. Restic can also work with an OpenStack RC file.
+- For all of the above requirements, you also need to specify what needs to be backed up.
 
 ---
 ## restic.restore
