@@ -11,9 +11,9 @@
 - [what is restic](#what-is-restic)
 - [configuring edwh restic](#configuring-edwh-restic)
 - [backup](#using-ew-resticbackup)
-- [restore](#resticrestore)
-- [snapshots](#resticsnapshots)
-- [configure](#resticconfigure)
+- [restore](#using-ew-resticrestore)
+- [snapshots](#using-ew-resticsnapshots)
+- [configure](#using-ew-resticconfigure)
 - [License](#license)
 
 ## Installing the plugin
@@ -107,7 +107,7 @@ Possible arguments for `ew restic.backup`:
 - **target**: restore files in captain hooks to be executed
 - **connection_choice**: connection to use for access to the repository. Can be OS, SFTP, B2, or 
   local.
-- **snapshot**: "latest" by default, see [snapshots](#resticsnapshots) for more information
+- **snapshot**: "latest" by default, see [snapshots](#using-ew-resticsnapshots) for more information
 - **message**: store a descriptive message with the backup, default message is `datetime.localtime()`
 - **verbose**: add verbosity, printing more debug information while processing the activity. 
 
@@ -128,7 +128,7 @@ Possible arguments for `ew restic.backup`:
 Possible arguments for the `ew restic.restore`
 - **connection_choice**: connection to use for access to the repository. Can be OS, SFTP, B2, or 
   local.
-- **snapshot**: "latest" by default, see [snapshots](#resticsnapshots) for more information
+- **snapshot**: "latest" by default, see [snapshots](#using-ew-resticsnapshots) for more information
 - **target**: restore files in captain hooks to be executed
 - **verbose**: add verbosity, printing more debug information while processing the activity. 
 
