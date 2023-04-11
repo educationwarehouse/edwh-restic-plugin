@@ -125,7 +125,7 @@ class Repository:
 
         return files
 
-    def execute_files(self, c, verbose: bool, target: str, verb: str, message: str = None, snapshot: str = "latest"):
+    def execute_files(self, c, target: str, verb: str, verbose: bool, message: str = None, snapshot: str = "latest"):
         """
         Executes the backup scripts retrieved by 'get_scripts' function.
 
@@ -181,7 +181,7 @@ class Repository:
         - verb (str): The verb associated with the backup.
         - message (str): The message to be associated with the backup.
         """
-        self.execute_files(c, verbose, target, "backup", message)
+        self.execute_files(c, target, "backup", verbose, message)
 
     def restore(self, c, verbose: bool, target: str, snapshot: str = "latest"):
         """
@@ -193,7 +193,7 @@ class Repository:
             - verb (str): The verb associated with the restore.
             - snapshot (str, optional): The snapshot to be used for the restore. Defaults to "latest".
             """
-        self.execute_files(c, verbose, target, "restore", None, snapshot)
+        self.execute_files(c, target, "restore", verbose, snapshot=snapshot)
 
     def check(self, c):
         """
