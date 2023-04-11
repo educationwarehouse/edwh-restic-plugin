@@ -26,6 +26,8 @@ But probably you want to install the whole `edwh` package:
 
 ```console
 pipx install edwh[plugins,omgeving]
+# or
+pipx install edwh[restic]
 ```
 
 ## What is Restic?
