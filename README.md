@@ -67,15 +67,15 @@ option `ServerAliveInterval 60` and `ServerAliveCountMax 240` in the SSH config.
 
 #### Openstack:
 > restic -r swift:container_name:/repo init
+---
+### Working with `captain-hooks` shell scripts
 
-## Working with `captain-hooks` shell scripts
-
-### backing up file(s) using Restic
+#### backing up file(s) using Restic with .sh
 example for backing up files using no stream
 >restic $HOST -r $URI backup --tag files *.sh
 
 example for backing up files using streams:
-> echo "hi" | restic $HOST -r $URI backup --tag stream --stdin --stdin-filename pg_dump.sql
+> (place stream here) | restic $HOST -r $URI backup --tag stream --stdin --stdin-filename (file_name)
 
 > NOTE: put restore commands as an .sh file in a folder named captain-hooks, the folder needs to be in the same dir
 > you run the inv restore in. SEE examples/captain-hooks for more info
@@ -86,12 +86,12 @@ example for backing up files using streams:
 
 ---
 
-### restoring file(s) using Restic
+#### restoring file(s) using Restic with .sh
 example for restoring files without using streams:
 > restic $HOST -r $URI restore latest --target recover_data --tag files
 
 example for restoring files using streams:
-> restic $HOST -r $URI dump $SNAPSHOT --tag stream pg_dump.sql
+> restic $HOST -r $URI dump $SNAPSHOT --tag stream (file_name)
 
 > NOTE: put restore commands as an .sh file in a folder named captain-hooks, the folder needs to be in the same dir
 > you run the inv restore in. See examples/captain-hooks for more info
@@ -103,7 +103,7 @@ example for restoring files using streams:
 
 ---
 ## Using `ew restic.backup`
-To backup file(s), use the `ew restic.backup` command
+**example**: `ew restic.backup -v -c=local`
 
 Possible arguments for `ew restic.backup`:
 - **target**: restore files in captain hooks to be executed
@@ -125,7 +125,7 @@ Possible arguments for `ew restic.backup`:
 ---
 ## Using `ew restic.restore`
 
-**example**: `ew restic.restore -v --target=* -c=local`
+**example**: `ew restic.restore -v -c=local`
 
 Possible arguments for the `ew restic.restore`
 - **connection_choice**: connection to use for access to the repository. Can be OS, SFTP, B2, or 
@@ -139,7 +139,7 @@ Possible arguments for the `ew restic.restore`
 
 list of all backups that are made
 
-> example command: ew restic.snapshots -c local
+**example**: `ew restic.snapshots -c local`
 
 ```
 Gebruikt connectie:  local

@@ -21,6 +21,22 @@ DOTENV = Path(".env")
 _dotenv_settings = {}
 
 
+def fix_tags(tags):
+    """
+    removes all None type elements from list
+    :param tags: list of string
+    :return:
+    """
+    i = 0
+    while i < len(tags):
+        if tags[i] is not None:
+            i += 1
+        else:
+            del tags[i]
+
+    return tags
+
+
 class Repository:
     # _targets: a list of file and directory paths that should be included in the backup.
     _targets = [".env", "./backup"]
@@ -143,7 +159,6 @@ class Repository:
         os.environ["SNAPSHOT"] = snapshot
 
         # Here you can make a message that you will see in the snapshots list
-        # so you know what's in the backup.
         if message is None:
             # If no message is provided, use the current local time as the backup message
             message = str(datetime.datetime.now()) + " localtime"
@@ -160,12 +175,14 @@ class Repository:
             if verbose:
                 print("running", file)
 
-            script_stdout = c.run(file).stdout
+            script_stdout = c.run(file, warn=True).stdout
+
             snapshot = self.get_snapshot_from(script_stdout)
             snapshots_created.append(snapshot)
 
         # send message with backup. see message for more info
-        tags = ["message"] + snapshots_created
+        # also if a tag in tags is None it will be removed by fix_tags
+        tags = fix_tags(["message"] + snapshots_created)
         c.run(
             f"restic {self.hostarg} -r {self.uri} backup --tag {','.join(tags)} --stdin --stdin-filename message",
             in_stream=io.StringIO(message),
@@ -246,6 +263,7 @@ class Repository:
                 )
 
         for snapshot, message_snapshots in message_snapshot_per_snapshot.items():
+            # print all Restic messages
             restore_output = c.run(
                 f"restic {self.hostarg} -r {self.uri} dump {message_snapshots[0]} --tag message message",
                 hide=True,
@@ -494,7 +512,7 @@ class SwiftRepository(Repository):
     @property
     def uri(self):
         """
-        :return: de swift uri met self.containername and self.name
+        :return: the swift uri with self.containername and self.name
         """
         return "swift:" + self.containername + ":/" + self.name
 
@@ -553,7 +571,6 @@ def read_dotenv(path: Path) -> dict:
 
     Args:
         path(Path): The path to the .env file.
-
 
     Returns:
         dict: A dictionary containing the key - value pairs in the .env file."""
@@ -670,8 +687,7 @@ def configure(c, connection_choice=None, restichostname=None):
 
 @task
 def backup(c, target="", connection_choice=None, message=None, verbose=False):
-    """
-    Performs a backup operation using restic on a local or remote/cloud file system.
+    """Performs a backup operation using restic on a local or remote/cloud file system.
 
     Args:
         target (str): The path of the file or directory to backup. Defaults to an empty string.
