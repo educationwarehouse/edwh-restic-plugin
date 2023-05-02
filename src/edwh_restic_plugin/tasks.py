@@ -53,14 +53,6 @@ class Repository:
         "sessions",
         "__pycache__",
     ]
-    # _stream_backup_cmd: a command line string that will be used to create a backup of a stream.
-    _stream_backup_cmd = "docker-compose run -T  --rm pg-0 pg_dump --format=p --dbname=backend --clean --create -h pgpool -U postgres"
-    # _stream_restore_cmd: a command line string that will be used to restore a backup from a stream.
-    _stream_restore_cmd = "cat - > ./migrate/data/database_to_restore.sql"
-    # _stream_filename: the name of the file where the stream is saved.
-    _stream_filename = "/postgres-backend-database.sql"
-    # _should_exist: the path of a file that should exist.
-    _should_exist = "/.env"
 
     def __init__(self) -> None:
         super().__init__()
@@ -125,7 +117,7 @@ class Repository:
         """Retrieves the scripts that contain a restic command and returns them to 'execute_files' to execute them.
 
         Args:
-        - target (str): target is a string that specifies the target of the backup. This can be a file, stream, directory,
+        - target (str): target is a string that specifies the target of the backup, can be a file, stream, directory,
         or any other object that needs to be backed up.
         - verb (str): is also a string that specifies the action to be performed on the target.
         For example, the verb could be "backup" or "restore". The verb is used in combination with the target to
