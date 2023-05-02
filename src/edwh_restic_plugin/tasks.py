@@ -130,12 +130,9 @@ class Repository:
         search for the backup script files that contain the restic command.
         """
         # get files by verb and target. EXAMPLE backup_files_*.sh
-        files = []
-        for file in DEFAULT_BACKUP_FOLDER.glob(verb + "_" + target + "*"):
-            files.append(str(file))
-
+        files = [str(file) for file in DEFAULT_BACKUP_FOLDER.glob(f"{verb}_{target}*")]
         # check if no files are found
-        if len(files) == 0:
+        if not files:
             print("no files found with target:", target)
             sys.exit(255)
 
@@ -161,7 +158,7 @@ class Repository:
         # Here you can make a message that you will see in the snapshots list
         if message is None:
             # If no message is provided, use the current local time as the backup message
-            message = str(datetime.datetime.now()) + " localtime"
+            message = f"{str(datetime.datetime.now())} localtime"
 
         # set MSG in envirement for sh files
         os.environ["MSG"] = message
