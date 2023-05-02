@@ -106,7 +106,8 @@ class Repository:
         Here comes the files that are going to be excluded"""
         return " --exclude ".join(self._excluded)
 
-    def get_snapshot_from(self, stdout: str):
+    @staticmethod
+    def get_snapshot_from(stdout: str):
         """
         Parses the stdout from a Restic command to extract the snapshot ID.
 
@@ -119,7 +120,8 @@ class Repository:
         snapshots_ids = re.findall(r"snapshot (.*?) saved", stdout)
         return snapshots_ids[-1] if snapshots_ids else None
 
-    def get_scripts(self, target, verb):
+    @staticmethod
+    def get_scripts(target, verb):
         """Retrieves the scripts that contain a restic command and returns them to 'execute_files' to execute them.
 
         Args:
@@ -152,7 +154,7 @@ class Repository:
         """
         self.prepare_for_restic(c)
 
-        # set snapshot available in enviroment for sh files
+        # set snapshot available in environment for sh files
         os.environ["SNAPSHOT"] = snapshot
 
         # Here you can make a message that you will see in the snapshots list
@@ -160,7 +162,7 @@ class Repository:
             # If no message is provided, use the current local time as the backup message
             message = f"{str(datetime.datetime.now())} localtime"
 
-        # set MSG in envirement for sh files
+        # set MSG in environment for sh files
         os.environ["MSG"] = message
 
         # get files by target and verb. see self.get_scripts for more info
@@ -238,10 +240,10 @@ class Repository:
             hide=True,
         ).stdout
 
-        snapshots = re.findall(r"^([0-9a-z]{8})\s", stdout, re.MULTILINE)
+        snapshot_lines = re.findall(r"^([0-9a-z]{8})\s", stdout, re.MULTILINE)
         main_tag_per_snapshot = {
             snapshot: re.findall(rf"^{snapshot}.*?(\w*)$", stdout, re.MULTILINE)
-            for snapshot in snapshots
+            for snapshot in snapshot_lines
             # snapshot: re.findall(rf"^{snapshot}", stdout) for snapshot in snapshots
         }
 
@@ -274,6 +276,11 @@ class Repository:
 
 
 class LocalRepository(Repository):
+    def __init__(self):
+        super().__init__()
+        self.password = None
+        self.name = None
+
     def setup(self):
         """Ensure the required settings are defined in the .env file."""
         self.name = check_env(
@@ -308,6 +315,12 @@ class LocalRepository(Repository):
 
 
 class SFTPRepository(Repository):
+    def __init__(self):
+        super().__init__()
+        self.hostname = None
+        self.password = None
+        self.name = None
+
     def setup(self):
         """Ensure the required settings are defined in the .env file."""
         check_env(
@@ -338,9 +351,8 @@ class SFTPRepository(Repository):
         os.environ["HOST"] = self.hostarg
         os.environ["URI"] = self.uri
         os.environ["RESTIC_PASSWORD"] = self.password
-        try:
-            c.run(f'ssh {self.hostname} "exit"')
-        except:
+        ran = c.run(f'ssh {self.hostname} "exit"', warn=True, hide=True)
+        if not ran.ok:
             print(
                 """
                 SSH config file not (properly) configured, configure according to the following format:
@@ -359,10 +371,18 @@ class SFTPRepository(Repository):
         """
         :return: sftp uri with self.hostname and self.name
         """
-        return "sftp:" + self.hostname + ":" + self.name
+        return f"sftp:{self.hostname}:{self.name}"
 
 
 class B2Repository(Repository):
+    def __init__(self):
+        super().__init__()
+        self.key = None
+        self.keyid = None
+        self.bucket_name = None
+        self.password = None
+        self.name = None
+
     def setup(self):
         """Ensure the required settings are defined in the .env file."""
         check_env(
@@ -401,7 +421,7 @@ class B2Repository(Repository):
         env = read_dotenv(DOTENV)
         self.name = env["B2_NAME"]
         self.password = env["B2_PASSWORD"]
-        self.bucketname = env["B2_BUCKETNAME"]
+        self.bucket_name = env["B2_BUCKETNAME"]
         self.keyid = env["B2_ACCOUNT_ID"]
         self.key = env["B2_ACCOUNT_KEY"]
         os.environ["B2_ACCOUNT_ID"] = self.keyid
@@ -415,10 +435,17 @@ class B2Repository(Repository):
         """
         :return: uri of b2 with self.bucketname and self.name
         """
-        return "b2:" + self.bucketname + ":" + self.name
+        return f"b2:{self.bucket_name}:{self.name}"
 
 
 class SwiftRepository(Repository):
+    def __init__(self):
+        super().__init__()
+        self.restic_password = None
+        self.password = None
+        self.container_name = None
+        self.name = None
+
     def setup(self):
         """Ensure the required settings are defined in the .env file."""
         check_env(
@@ -493,7 +520,7 @@ class SwiftRepository(Repository):
         """read variables out of .env file"""
         env = read_dotenv(DOTENV)
         self.name = env["OS_NAME"]
-        self.containername = env["OS_CONTAINERNAME"]
+        self.container_name = env["OS_CONTAINERNAME"]
         os.environ["OS_USERNAME"] = env["OS_USERNAME"]
         os.environ["OS_AUTH_URL"] = env["OS_AUTH_URL"]
         os.environ["OS_TENANT_ID"] = env["OS_TENANT_ID"]
@@ -511,7 +538,7 @@ class SwiftRepository(Repository):
         """
         :return: the swift uri with self.containername and self.name
         """
-        return "swift:" + self.containername + ":/" + self.name
+        return f"swift:{self.container_name}:/{self.name}"
 
 
 def set_env_value(path: Path, target: str, value: str) -> None:
@@ -553,7 +580,7 @@ def set_env_value(path: Path, target: str, value: str) -> None:
             outlines.append(line)
     if not geschreven:
         # if target in .env file
-        outlines.append(f"{target.strip().upper()}={str(value).strip()}")
+        outlines.append(f"{target.strip().upper()}={value.strip()}")
     with path.open(mode="w") as env_file:
         # write outlines to .env file
         env_file.write("\n".join(outlines))
@@ -608,27 +635,26 @@ def check_env(
     Test if key is in .env file path, appends prompted or default value if missing.
     """
     env = read_dotenv(path)
-    if key not in env:
-        with path.open(mode="r+") as env_file:
-            # get response value from promt/input
-            response = input(
-                f"Enter value for {key} ({comment})\n default=`{default}`: "
-            )
-            # if response_value is none make value default else value is response_value
-            value = response.strip() or default
-            if prefix:
-                value = prefix + value
-            if postfix:
-                value += postfix
-            env_file.seek(0, 2)
-            # write key and value to .env file
-            env_file.write(f"\n{key.upper()}={value}\n")
-
-            # update in memory too:
-            env[key] = value
-            return value
-    else:
+    if key in env:
         return env[key]
+    with path.open(mode="r+") as env_file:
+        # get response value from prompt/input
+        response = input(
+            f"Enter value for {key} ({comment})\n default=`{default}`: "
+        )
+        # if response_value is none make value default else value is response_value
+        value = response.strip() or default
+        if prefix:
+            value = prefix + value
+        if postfix:
+            value += postfix
+        env_file.seek(0, 2)
+        # write key and value to .env file
+        env_file.write(f"\n{key.upper()}={value}\n")
+
+        # update in memory too:
+        env[key] = value
+        return value
 
 
 # the order in which the backup will be saved
@@ -644,7 +670,7 @@ CONNECTION_CLASS_MAP = OrderedDict(
 )
 
 
-def cli_repo(c, connection_choice=None, restichostname=None):
+def cli_repo(connection_choice=None, restichostname=None):
     """
     Create a repository object and set up the connection to the backend.
     :param connection_choice: choose where you want to store the repo (local, SFTP, B2, swift)
@@ -658,7 +684,7 @@ def cli_repo(c, connection_choice=None, restichostname=None):
         # search for the most important backup and use it as default
         for connection_choice in CONNECTION_CLASS_MAP.keys():
             connection_lowercase = connection_choice.lower()
-            if connection_choice.upper() + "_NAME" in env:
+            if f"{connection_choice.upper()}_NAME" in env:
                 break
     else:
         connection_lowercase = connection_choice.lower()
@@ -679,7 +705,7 @@ def configure(c, connection_choice=None, restichostname=None):
     # It has been decided to create a main path called 'backups' for each repository.
     # This can be changed or removed if desired.
     # A password is only passed with a few functions.
-    cli_repo(c, connection_choice, restichostname).configure(c)
+    cli_repo(connection_choice, restichostname).configure(c)
 
 
 @task
@@ -713,7 +739,7 @@ def backup(c, target="", connection_choice=None, message=None, verbose=False):
     # --exclude-larger-than 'size', Specified once to excludes files larger than the given size.
     # Please see 'restic help backup' for more specific information about each exclude option.
 
-    cli_repo(c, connection_choice).backup(c, verbose, target, message)
+    cli_repo(connection_choice).backup(c, verbose, target, message)
 
 
 @task
@@ -751,16 +777,18 @@ def restore(
         inspected = json.loads(docker_inspect.stdout)
         volumes_to_remove = []
         for service in inspected:
-            for mount in service["Mounts"]:
-                if mount["Type"] == "volume":
-                    volumes_to_remove.append(mount["Name"])
+            volumes_to_remove.extend(
+                mount["Name"]
+                for mount in service["Mounts"]
+                if mount["Type"] == "volume"
+            )
         # Remove the containers before a volume can be removed.
         c.run("docker-compose rm -f pg-0 pg-1")
         # Remove the volumes.
         for volume_name in volumes_to_remove:
-            c.run("docker volume rm " + volume_name)
+            c.run(f"docker volume rm {volume_name}")
 
-    cli_repo(c, connection_choice).restore(c, verbose, target, snapshot)
+    cli_repo(connection_choice).restore(c, verbose, target, snapshot)
     # print("`inv up` to restart the services.")
 
 
@@ -777,4 +805,4 @@ def snapshots(c, connection_choice=None, tag=None, n=1):
     if tag is None:
         tag = ["files", "stream"]
 
-    cli_repo(c, connection_choice).snapshot(c, tags=tag, n=n)
+    cli_repo(connection_choice).snapshot(c, tags=tag, n=n)
