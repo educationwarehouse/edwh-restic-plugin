@@ -161,7 +161,7 @@ class Repository:
         # Here you can make a message that you will see in the snapshots list
         if message is None:
             # If no message is provided, use the current local time as the backup message
-            message = str(datetime.datetime.now()) + " localtime"
+            message = f"{str(datetime.datetime.now())} localtime"
 
         # set MSG in envirement for sh files
         os.environ["MSG"] = message
@@ -182,11 +182,12 @@ class Repository:
 
         # send message with backup. see message for more info
         # also if a tag in tags is None it will be removed by fix_tags
-        tags = fix_tags(["message"] + snapshots_created)
-        c.run(
-            f"restic {self.hostarg} -r {self.uri} backup --tag {','.join(tags)} --stdin --stdin-filename message",
-            in_stream=io.StringIO(message),
-        )
+        if verb != "restore":
+            tags = fix_tags(["message"] + snapshots_created)
+            c.run(
+                f"restic {self.hostarg} -r {self.uri} backup --tag {','.join(tags)} --stdin --stdin-filename message",
+                in_stream=io.StringIO(message),
+            )
 
     def backup(self, c, verbose: bool, target: str, message: str):
         """
@@ -661,7 +662,7 @@ def cli_repo(c, connection_choice=None, restichostname=None):
         # search for the most important backup and use it as default
         for connection_choice in CONNECTION_CLASS_MAP.keys():
             connection_lowercase = connection_choice.lower()
-            if connection_choice.upper() + "_NAME" in env:
+            if f"{connection_choice.upper()}_NAME" in env:
                 break
     else:
         connection_lowercase = connection_choice.lower()

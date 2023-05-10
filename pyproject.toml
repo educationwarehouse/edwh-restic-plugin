@@ -26,7 +26,8 @@ classifiers = [
 ]
 dependencies = [
   'invoke',
-  'tqdm'
+  'tqdm',
+  'diceware'
 ]
 
 [project.entry-points."edwh.tasks"]

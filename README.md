@@ -34,7 +34,7 @@ pipx install edwh[restic]
 Restic is a program that automatically stores backups in a separate repository, securing them with a password and compressing them. 
 There are multiple options for storing backups, including locally on the same host, SFTP to a remote host,
 and remotely to various systems and providers such as Amazon, REST, Minio, Wasabi, Alibaba Cloud, Openstack, Backblaze, 
-Azure, Google, and rclone.
+Azure, Google, and rclone. 
 
 ## Configuring `edwh restic.*`
 For EDWH, they use local storage, SFTP, Backblaze, and Openstack.
