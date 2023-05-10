@@ -145,6 +145,7 @@ class Repository:
         - snapshot (str, optional): The snapshot to be used for the backup. Defaults to "latest".
         """
         self.prepare_for_restic(c)
+        c.run("sudo chmod +x *.sh")
 
         # set snapshot available in environment for sh files
         os.environ["SNAPSHOT"] = snapshot
