@@ -2,6 +2,13 @@
 
 <!--next-version-placeholder-->
 
+## v0.1.3 (2023-05-11)
+### Fix
+* Remove sudo chmod +x *.sh because owasp risks ([`84fa3ed`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/84fa3ed29f6d154ea7b2f24e0bd632e53a4bdc04))
+* Some .sh files cannot be executed because they don't have the executable permission ([`f4361a5`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/f4361a54b5487e35a9bacd5982e8dadabbf2e286))
+* Fixed restore doing a backup and fixed some docs ([`b8175a1`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/b8175a1a75a2ce9af6b84e8eb50bc6701d5ea9c6))
+* Improved examples for stream backup and restore ([`ccedf74`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/ccedf74649bdebc179b97ac0a0d0c42a14776816))
+
 ## v0.1.2 (2023-05-02)
 
 ### Feature
