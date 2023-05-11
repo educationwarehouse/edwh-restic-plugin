@@ -30,13 +30,20 @@ dependencies = [
   'diceware'
 ]
 
+[project.optional-dependencies]
+dev = [
+  "hatch",
+  # "python-semantic-release >= 8.0.0a5",
+  "black",
+]
+
 [project.entry-points."edwh.tasks"]
 restic = "edwh_restic_plugin.tasks"
 
 [project.urls]
-Documentation = "https://github.com/unknown/edwh-restic-plugin#readme"
-Issues = "https://github.com/unknown/edwh-restic-plugin/issues"
-Source = "https://github.com/unknown/edwh-restic-plugin"
+Documentation = "https://github.com/educationwarehouse/edwh-restic-plugin#readme"
+Issues = "https://github.com/educationwarehouse/edwh-restic-plugin/issues"
+Source = "https://github.com/educationwarehouse/edwh-restic-plugin"
 
 [tool.hatch.version]
 path = "src/edwh_restic_plugin/__about__.py"
