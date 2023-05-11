@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v0.1.4 (2023-05-11)
+
+
 ## v0.1.3 (2023-05-11)
 ### Fix
 * Remove sudo chmod +x *.sh because owasp risks ([`84fa3ed`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/84fa3ed29f6d154ea7b2f24e0bd632e53a4bdc04))
