@@ -2,6 +2,15 @@
 
 <!--next-version-placeholder-->
 
+## v0.1.5 (2023-05-24)
+### Fix
+* Added enviroment variables HOST AND URI for restic(automaticly see https://restic.readthedocs.io/en/latest/040_backup.html?highlight=environment#environment-variables for more). ([`a836553`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a836553c5478511c9c57416b441e027ad12df9fc))
+* Merge van sh files ([`20c198f`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/20c198ffab40165cf7a50b9dcce98a62b719ed82))
+* Added verbosity to the script output ([`30a824e`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/30a824e8f77f854fe9c201009f4013d23474f5d7))
+
+### Documentation
+* Removed spelling mistake in readme(restore -> backup) ([`31efedb`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/31efedb7e99013c39db45a42e31cdfeaf8e24394))
+
 ## v0.1.4 (2023-05-11)
 
 
