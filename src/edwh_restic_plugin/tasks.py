@@ -298,6 +298,8 @@ class LocalRepository(Repository):
         self.name = env["LOCAL_NAME"]
         os.environ["HOST"] = self.hostarg
         os.environ["URI"] = self.uri
+        os.environ["RESTIC_HOST"] = self.hostarg
+        os.environ["RESTIC_REPOSITORY"] = self.uri
         os.environ["RESTIC_PASSWORD"] = self.password = env["LOCAL_PASSWORD"]
 
     @property
@@ -346,6 +348,8 @@ class SFTPRepository(Repository):
         self.hostname = env["SFTP_HOSTNAME"]
         os.environ["HOST"] = self.hostarg
         os.environ["URI"] = self.uri
+        os.environ["RESTIC_HOST"] = self.hostarg
+        os.environ["RESTIC_REPOSITORY"] = self.uri
         os.environ["RESTIC_PASSWORD"] = self.password
         ran = c.run(f'ssh {self.hostname} "exit"', warn=True, hide=True)
         if not ran.ok:
@@ -422,6 +426,8 @@ class B2Repository(Repository):
         self.key = env["B2_ACCOUNT_KEY"]
         os.environ["B2_ACCOUNT_ID"] = self.keyid
         os.environ["B2_ACCOUNT_KEY"] = self.key
+        os.environ["RESTIC_REPOSITORY"] = self.uri
+        os.environ["RESTIC_HOST"] = self.hostarg
         os.environ["RESTIC_PASSWORD"] = self.password
         os.environ["HOST"] = self.hostarg
         os.environ["URI"] = self.uri
@@ -526,6 +532,8 @@ class SwiftRepository(Repository):
         # os.environ["OS_AUTH_TOKEN"] = self.key = env["OS_AUTH_TOKEN"]
         os.environ["OS_PASSWORD"] = self.password = env["OS_PASSWORD"]
         os.environ["RESTIC_PASSWORD"] = self.restic_password = env["OS_RESTIC_PASSWORD"]
+        os.environ["RESTIC_REPOSITORY"] = self.uri
+        os.environ["RESTIC_HOST"] = self.hostarg
         os.environ["HOST"] = self.hostarg
         os.environ["URI"] = self.uri
 
