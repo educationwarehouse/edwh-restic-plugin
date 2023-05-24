@@ -168,6 +168,9 @@ class Repository:
 
             script_stdout = c.run(file, warn=True).stdout
 
+            if verbose:
+                print(script_stdout)
+
             snapshot = self.get_snapshot_from(script_stdout)
             snapshots_created.append(snapshot)
 
