@@ -166,12 +166,13 @@ class Repository:
             if verbose:
                 print("running", file)
 
-            script_stdout = c.run(file, warn=True).stdout
+            ran_script = c.run(file, warn=True)
 
             if verbose:
-                print(script_stdout)
+                print(f"{file} output:")
+                print(f"{ran_script.stdout}\n{ran_script.stderr}")
 
-            snapshot = self.get_snapshot_from(script_stdout)
+            snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
 
         # send message with backup. see message for more info
