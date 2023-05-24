@@ -80,7 +80,7 @@ example for backing up files using streams:
 > NOTE: put restore commands as an .sh file in a folder named captain-hooks, the folder needs to be in the same dir
 > you run the inv restore in. SEE examples/captain-hooks for more info
 
-**variables you can use in the restore sh file**
+**variables you can use in the backup sh file**
 - $HOST
 - $URI
 
