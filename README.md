@@ -157,7 +157,16 @@ d845dc99  2023-04-05 17:49:21  ubuntu-hp  message
 ## Using `ew restic.configure`
 setting up the .env file for the specified repository. Which can be OS, SFTP, B2, or local.
 
-## License
 
+## Using `ew restic.run`
+this command sets up an eviroment with the connection choice of your choosing and runs the input command until the user 
+types "exit".
+
+Possible arguments for `ew restic.backup`:
+- **connection_choice(-c)**: connection to use for access to the repository. Can be OS, SFTP, B2, or 
+  local.
+
+
+## License
 `edwh-restic-plugin` is distributed under the terms of the [MIT](https://spdx.org/licenses/MIT.html) license.
 See [the license](LICENSE.txt) for details. 

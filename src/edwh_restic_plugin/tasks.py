@@ -108,7 +108,7 @@ class Repository:
 
         Returns:
         - The snapshot ID as a string.
-                """
+        """
         snapshots_ids = re.findall(r"snapshot (.*?) saved", stdout)
         return snapshots_ids[-1] if snapshots_ids else None
 
@@ -132,7 +132,15 @@ class Repository:
 
         return files
 
-    def execute_files(self, c, target: str, verb: str, verbose: bool, message: str = None, snapshot: str = "latest"):
+    def execute_files(
+        self,
+        c,
+        target: str,
+        verb: str,
+        verbose: bool,
+        message: str = None,
+        snapshot: str = "latest",
+    ):
         """
         Executes the backup scripts retrieved by 'get_scripts' function.
 
@@ -200,14 +208,14 @@ class Repository:
 
     def restore(self, c, verbose: bool, target: str, snapshot: str = "latest"):
         """
-            Restores the specified target using the specified snapshot or the latest if None is given.
+        Restores the specified target using the specified snapshot or the latest if None is given.
 
-            Args:
-            - verbose (bool): A flag indicating whether to display verbose output.
-            - target (str): The target of the restore.
-            - verb (str): The verb associated with the restore.
-            - snapshot (str, optional): The snapshot to be used for the restore. Defaults to "latest".
-            """
+        Args:
+        - verbose (bool): A flag indicating whether to display verbose output.
+        - target (str): The target of the restore.
+        - verb (str): The verb associated with the restore.
+        - snapshot (str, optional): The snapshot to be used for the restore. Defaults to "latest".
+        """
         self.execute_files(c, target, "restore", verbose, snapshot=snapshot)
 
     def check(self, c):
@@ -254,7 +262,7 @@ class Repository:
             if tag_name not in ["message"]:
                 continue
             for _, is_message_for_snapshot_id in re.findall(
-                    rf"\n{snapshot}.*(\n\s+(.*)\n)+", stdout
+                rf"\n{snapshot}.*(\n\s+(.*)\n)+", stdout
             ):
                 message_snapshot_per_snapshot[is_message_for_snapshot_id].append(
                     snapshot
@@ -631,12 +639,12 @@ def read_dotenv(path: Path) -> dict:
 
 
 def check_env(
-        path: Path,
-        key: str,
-        default: typing.Optional[str],
-        comment: str,
-        prefix: str | None = None,
-        postfix: str | None = None,
+    path: Path,
+    key: str,
+    default: typing.Optional[str],
+    comment: str,
+    prefix: str | None = None,
+    postfix: str | None = None,
 ):
     """
     Test if key is in .env file path, appends prompted or default value if missing.
@@ -646,9 +654,7 @@ def check_env(
         return env[key]
     with path.open(mode="r+") as env_file:
         # get response value from prompt/input
-        response = input(
-            f"Enter value for {key} ({comment})\n default=`{default}`: "
-        )
+        response = input(f"Enter value for {key} ({comment})\n default=`{default}`: ")
         # if response_value is none make value default else value is response_value
         value = response.strip() or default
         if prefix:
@@ -750,13 +756,7 @@ def backup(c, target="", connection_choice=None, message=None, verbose=False):
 
 
 @task
-def restore(
-        c,
-        connection_choice=None,
-        snapshot="latest",
-        target="",
-        verbose=False
-):
+def restore(c, connection_choice=None, snapshot="latest", target="", verbose=False):
     """
     The restore function restores the latest backed-up files by default and puts them in a restore folder.
 
@@ -799,7 +799,7 @@ def restore(
     # print("`inv up` to restart the services.")
 
 
-@task(iterable=['tag'])
+@task(iterable=["tag"])
 def snapshots(c, connection_choice=None, tag=None, n=1):
     """
     With this je can see per repo which repo is made when and where, the repo-id can be used at inv restore as an option
@@ -813,3 +813,16 @@ def snapshots(c, connection_choice=None, tag=None, n=1):
         tag = ["files", "stream"]
 
     cli_repo(connection_choice).snapshot(c, tags=tag, n=n)
+
+
+@task()
+def run(c, connection_choice=None):
+    """
+    This function prepares for restic and runs the input command until the user types "exit".
+
+    :param connection_choice (str): The connection name of the repository.
+    """
+
+    cli_repo(connection_choice).prepare_for_restic(c)
+    while (command:=input("> ")) != "exit":
+        print(c.run(command, hide=True, warn=True, pty=True))
