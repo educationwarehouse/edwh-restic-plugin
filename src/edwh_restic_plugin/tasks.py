@@ -166,12 +166,14 @@ class Repository:
             if verbose:
                 print("running", file)
 
-            ran_script = c.run(file, warn=True)
+            ran_script = c.run(file, hide=True, warn=True, pty=True)
 
             if verbose:
                 print(f"{file} output:")
-                print(f"{ran_script.stdout}\n{ran_script.stderr}")
-
+                if ran_script.stdout or ran_script.stderr:
+                    print(f"out:{ran_script.stdout}\nerr:{ran_script.stderr}")
+                else:
+                    print("no output found!")
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
 
