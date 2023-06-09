@@ -193,6 +193,8 @@ class Repository:
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
 
+        print("\n\nfile status codes")
+
         for idx in range(len(file_codes)):
             if file_codes[idx] == 0:
                 print(files[idx], tag="success", tag_color="green", color='white', format='underline')
