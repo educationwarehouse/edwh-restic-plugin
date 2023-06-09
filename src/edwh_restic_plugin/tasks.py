@@ -177,13 +177,21 @@ class Repository:
                 print("\033[1m running", file, "\033[0m")
 
             # run the script by default with pty=True, when the script crashes run the script again but then grab the stdout
+
             try:
                 print(f"{file} output:")
-                ran_script: invoke.runners.Result = c.run(file, hide=verbose, pty=True)
+                ran_script: invoke.runners.Result = c.run(file, hide=True, pty=True)
                 file_codes.append(0)
-            except:
+            except invoke.exceptions.UnexpectedExit as e:
                 file_codes.append(1)
-                continue
+                ran_script = e.result
+
+            if verbose:
+                print(f"{file} output:")
+                if ran_script.stdout:
+                    print(f"stdout:{ran_script.stdout}")
+                else:
+                    print("no output found!")
 
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
