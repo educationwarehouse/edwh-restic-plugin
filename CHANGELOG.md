@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.2.2 (2023-06-09)
+### Fix
+* Made verbosity better when running files using backup or restore ([`cf37f24`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/cf37f2480e188a58a79c33a1e3cf4ba2ce2802c9))
+
 ## v0.2.1 (2023-06-09)
 ### Fix
 * Automatically using verbose and now always hiding restic message ([`7d6537f`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/7d6537f800230c076b07996e454556620e6888c8))
