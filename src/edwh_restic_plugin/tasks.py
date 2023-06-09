@@ -135,7 +135,7 @@ class Repository:
 
     def execute_files(
         self,
-        c,
+        c: invoke.context.Context,
         target: str,
         verb: str,
         verbose: bool,
@@ -176,19 +176,14 @@ class Repository:
             if verbose:
                 print("\033[1m running", file, "\033[0m")
 
+            # run the script by default with pty=True, when the script crashes run the script again but then grab the stdout
             try:
-                ran_script = c.run(file, hide=True, pty=True)
+                print(f"{file} output:")
+                ran_script: invoke.runners.Result = c.run(file, hide=verbose, pty=True)
                 file_codes.append(0)
             except:
                 file_codes.append(1)
-            if verbose:
-                print(f"{file} output:")
-                if ran_script.stdout:
-                    print(f"stdout:{ran_script.stdout}")
-                elif ran_script.stderr:
-                    print(f"stderr:{ran_script.stderr}")
-                else:
-                    print("no output found!")
+                continue
 
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
