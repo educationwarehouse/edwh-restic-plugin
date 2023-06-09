@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.2.4 (2023-06-09)
+### Fix
+* Fixed a bug where it prints error and succes multiple times for the same file ([`4bfa7d2`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/4bfa7d27c50097619a2620b6f38b27a0f217eb04))
+
 ## v0.2.3 (2023-06-09)
 ### Fix
 * Small updates to color-coding and clearer prints. also fixed a bug where a error will print for every sh script that failed ([`5c9f164`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/5c9f1642ae25c084a426592fd6c4fca40ca9d5d7))
