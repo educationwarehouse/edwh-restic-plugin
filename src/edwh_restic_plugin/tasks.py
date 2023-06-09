@@ -183,8 +183,8 @@ class Repository:
                 ran_script: invoke.runners.Result = c.run(file, hide=True, pty=True)
                 file_codes.append(0)
             except invoke.exceptions.UnexpectedExit as e:
-                file_codes.append(1)
                 ran_script = e.result
+                file_codes.append(e.result.exited)
 
             if verbose:
                 print(f"{file} output:")
@@ -196,14 +196,6 @@ class Repository:
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
 
-        print("\n\nfile status codes")
-
-        for idx in range(len(file_codes)):
-            if file_codes[idx] == 0:
-                print(files[idx], tag="success", tag_color="green", color='white', format='underline')
-            else:
-                print("in", files[idx], tag="failure", tag_color="red", color='white', format='underline')
-
         # send message with backup. see message for more info
         # also if a tag in tags is None it will be removed by fix_tags
         if verb != "restore":
@@ -213,6 +205,17 @@ class Repository:
                 in_stream=io.StringIO(message),
                 hide=True
             )
+
+        print("\n\nfile status codes:")
+
+        for idx in range(len(file_codes)):
+            if file_codes[idx] == 0:
+                print(files[idx], tag="success", tag_color="green", color='white')
+            else:
+                print("in", files[idx], tag="failure", tag_color="red", color='white')
+
+        if worst_status_code := max(file_codes) > 0:
+            exit(worst_status_code)
 
     def backup(self, c, verbose: bool, target: str, message: str):
         """
