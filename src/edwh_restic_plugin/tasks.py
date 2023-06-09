@@ -192,6 +192,7 @@ class Repository:
             c.run(
                 f"restic {self.hostarg} -r {self.uri} backup --tag {','.join(tags)} --stdin --stdin-filename message",
                 in_stream=io.StringIO(message),
+                hide=True
             )
 
     def backup(self, c, verbose: bool, target: str, message: str):
@@ -279,7 +280,6 @@ class Repository:
             stdout = re.sub(
                 rf"\n{snapshot}(.*)\n", rf"\n{snapshot}\1 : [{message}]\n", stdout
             )
-        print(stdout)
 
 
 class LocalRepository(Repository):
@@ -722,7 +722,7 @@ def configure(c, connection_choice=None, restichostname=None):
 
 
 @task
-def backup(c, target="", connection_choice=None, message=None, verbose=False):
+def backup(c, target="", connection_choice=None, message=None, verbose=True):
     """Performs a backup operation using restic on a local or remote/cloud file system.
 
     Args:
@@ -756,7 +756,7 @@ def backup(c, target="", connection_choice=None, message=None, verbose=False):
 
 
 @task
-def restore(c, connection_choice=None, snapshot="latest", target="", verbose=False):
+def restore(c, connection_choice=None, snapshot="latest", target="", verbose=True):
     """
     The restore function restores the latest backed-up files by default and puts them in a restore folder.
 
