@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.2.6 (2023-06-09)
+### Fix
+* Made it so the tasks.py doesn't throw an error when the shell throws an error. this is done by adding hide=verbose and removing the if vebose.... the reason also why we aren't using pty=true and warn=true is because pty=true NEVER prints to stderr(see https://docs.pyinvoke.org/en/stable/api/runners.html#invoke.runners.Runner.run and the the pty part) ([`ff4f819`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/ff4f819a4df93889aad3b6155373cc17b42dcc02))
+
 ## v0.2.5 (2023-06-09)
 ### Fix
 * Fixed that the status codes of the [succes] and [failure] are a bit clearer ([`1d3fe77`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/1d3fe773a7481811efff23ec0a5eade565c91caa))
