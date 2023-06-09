@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.3.0 (2023-06-09)
+### Feature
+* Edwh-restic-plugin now exist with the highest status code one of the given shell scripts gave it ([`281f600`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/281f600082cba3853b1bc35efda93ea50ea8f3b5))
+
 ## v0.2.7 (2023-06-09)
 ### Fix
 * Made it now so it gets the result is captured even when throwing exception ([`fad076a`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/fad076aab666925c2bb795a2705500215f7500c5))
