@@ -181,22 +181,20 @@ class Repository:
                 file_codes.append(0)
             except:
                 file_codes.append(1)
-                print("in", file, tag="failure", tag_color="red", color='white', format='underline', background='grey')
             if verbose:
                 print(f"{file} output:")
                 if ran_script.stdout:
-                    print(f"out:{ran_script.stdout}")
+                    print(f"stdout:{ran_script.stdout}")
                 elif ran_script.stderr:
-                    print(f"err:{ran_script.stderr}")
+                    print(f"stderr:{ran_script.stderr}")
                 else:
                     print("no output found!")
 
             for file_code in file_codes:
                 if file_code == 0:
-                    print(file, tag="success", tag_color="green", color='white', format='underline', background='grey')
+                    print(file, tag="success", tag_color="green", color='white', format='underline')
                 else:
-                    print("in", file, tag="failure", tag_color="red", color='white', format='underline',
-                          background='grey')
+                    print("in", file, tag="failure", tag_color="red", color='white', format='underline')
 
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
