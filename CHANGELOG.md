@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.2.3 (2023-06-09)
+### Fix
+* Small updates to color-coding and clearer prints. also fixed a bug where a error will print for every sh script that failed ([`5c9f164`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/5c9f1642ae25c084a426592fd6c4fca40ca9d5d7))
+
 ## v0.2.2 (2023-06-09)
 ### Fix
 * Made verbosity better when running files using backup or restore ([`cf37f24`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/cf37f2480e188a58a79c33a1e3cf4ba2ce2802c9))
