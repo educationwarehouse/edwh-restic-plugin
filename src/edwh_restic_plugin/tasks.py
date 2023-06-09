@@ -11,6 +11,7 @@ import re
 import sys
 import typing
 import json
+from print_color import print
 
 from tqdm import tqdm
 
@@ -169,19 +170,34 @@ class Repository:
         files = self.get_scripts(target, verb)
 
         snapshots_created = []
+        file_codes = []
         # run all backup/restore files
         for file in tqdm(files):
             if verbose:
-                print("running", file)
+                print("\033[1m running", file, "\033[0m")
 
-            ran_script = c.run(file, hide=True, warn=True, pty=True)
-
+            try:
+                ran_script = c.run(file, hide=True, pty=True)
+                file_codes.append(0)
+            except:
+                file_codes.append(1)
+                print("in", file, tag="failure", tag_color="red", color='white', format='underline', background='grey')
             if verbose:
                 print(f"{file} output:")
-                if ran_script.stdout or ran_script.stderr:
-                    print(f"out:{ran_script.stdout}\nerr:{ran_script.stderr}")
+                if ran_script.stdout:
+                    print(f"out:{ran_script.stdout}")
+                elif ran_script.stderr:
+                    print(f"err:{ran_script.stderr}")
                 else:
                     print("no output found!")
+
+            for file_code in file_codes:
+                if file_code == 0:
+                    print(file, tag="success", tag_color="green", color='white', format='underline', background='grey')
+                else:
+                    print("in", file, tag="failure", tag_color="red", color='white', format='underline',
+                          background='grey')
+
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
 

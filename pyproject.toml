@@ -25,6 +25,7 @@ classifiers = [
 dependencies = [
   'invoke',
   'tqdm',
+  'print-color',
   'diceware'
 ]
 
