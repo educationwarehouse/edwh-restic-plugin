@@ -190,14 +190,14 @@ class Repository:
                 else:
                     print("no output found!")
 
-            for file_code in file_codes:
-                if file_code == 0:
-                    print(file, tag="success", tag_color="green", color='white', format='underline')
-                else:
-                    print("in", file, tag="failure", tag_color="red", color='white', format='underline')
-
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
+
+        for idx in range(len(file_codes)):
+            if file_codes[idx] == 0:
+                print(files[idx], tag="success", tag_color="green", color='white', format='underline')
+            else:
+                print("in", files[idx], tag="failure", tag_color="red", color='white', format='underline')
 
         # send message with backup. see message for more info
         # also if a tag in tags is None it will be removed by fix_tags
