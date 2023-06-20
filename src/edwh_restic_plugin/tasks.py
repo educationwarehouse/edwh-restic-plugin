@@ -210,9 +210,9 @@ class Repository:
 
         for idx in range(len(file_codes)):
             if file_codes[idx] == 0:
-                print(files[idx], tag="success", tag_color="green", color='white')
+                print(files[idx], tag="success", tag_color="green")
             else:
-                print("in", files[idx], tag="failure", tag_color="red", color='white')
+                print("in", files[idx], tag="failure", tag_color="red")
 
         if worst_status_code := max(file_codes) > 0:
             exit(worst_status_code)
