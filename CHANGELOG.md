@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.3.2 (2023-06-27)
+### Fix
+* Added expanduser() to check_env to make `~/` work ([`7d5fcd5`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/7d5fcd5eae40943f0d4e2143e89ea761373fec4a))
+
 ## v0.3.1 (2023-06-20)
 ### Fix
 * Fixed color coding in restic plugin. now doesn't only print in white but in set color of the cmd ([`80ad277`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/80ad27717a89c9843b62d002e214493ad428c39c))
