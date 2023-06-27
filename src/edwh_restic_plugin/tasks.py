@@ -679,6 +679,8 @@ def check_env(
         response = input(f"Enter value for {key} ({comment})\n default=`{default}`: ")
         # if response_value is none make value default else value is response_value
         value = response.strip() or default
+        if value.startswith("~/") and Path(value).expanduser().exists():
+            value = Path(value).expanduser().__str__()
         if prefix:
             value = prefix + value
         if postfix:
