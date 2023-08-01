@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v0.3.3-beta.5 (2023-08-01)
+
+
 ## v0.3.3-beta.4 (2023-08-01)
 ### Fix
 * Hide 'message' tagged entries from restic.snapshots ([`16702f8`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/16702f87f773a58abba1770e19faa0867ccfe480))
