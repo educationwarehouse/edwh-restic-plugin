@@ -219,7 +219,7 @@ class Repository(abc.ABC):
 
         Args:
         - verbose (bool): A flag indicating whether to display verbose output.
-        - target (str): The target of the backup.
+        - target (str): The target of the backup (e.g. 'files', 'stream'; default is all types).
         - verb (str): The verb associated with the backup.
         - message (str): The message to be associated with the backup.
         """
@@ -244,13 +244,14 @@ class Repository(abc.ABC):
         self.prepare_for_restic(c)
         c.run(f"restic {self.hostarg} -r {self.uri} check --read-data")
 
-    def snapshot(self, c, tags: list = None, n=2):
+    def snapshot(self, c: Context, tags: list[str] = None, n: int = 2, verbose: bool = False):
         """
         a list of all the backups with a message
 
         Args:
         - tags (list, optional): A list of tags to use for the snapshot. Defaults to None.
         - n (int, optional): The number of latest snapshots to show. Defaults to 2.
+        - verbose (bool): Show more info about what's happening?
 
         Returns:
         None. This function only prints the output to the console.
@@ -261,8 +262,11 @@ class Repository(abc.ABC):
 
         self.prepare_for_restic(c)
         tags = "--tag " + " --tag ".join(tags) if tags else ""
+        command = f"restic {self.hostarg} -r {self.uri} snapshots --latest {n} {tags} -c"
+        if verbose:
+            print(command, file=sys.stderr)
         stdout = c.run(
-            f"restic {self.hostarg} -r {self.uri} snapshots --latest {n} {tags} -c",
+            command,
             hide=True,
         ).stdout
 
@@ -283,13 +287,18 @@ class Repository(abc.ABC):
 
         for snapshot, message_snapshots in message_snapshot_per_snapshot.items():
             # print all Restic messages
+            command = f"restic {self.hostarg} -r {self.uri} dump {message_snapshots[0]} --tag message message"
+            if verbose:
+                print(command, file=sys.stderr)
+
             restore_output = c.run(
-                f"restic {self.hostarg} -r {self.uri} dump {message_snapshots[0]} --tag message message",
+                command,
                 hide=True,
                 warn=True,
             ).stdout
             message = restore_output.strip()
             stdout = re.sub(rf"\n{snapshot}(.*)\n", rf"\n{snapshot}\1 : [{message}]\n", stdout)
+            print(stdout)
 
 
 class LocalRepository(Repository):
@@ -743,12 +752,12 @@ def configure(c, connection_choice=None, restichostname=None):
 
 
 @task
-def backup(c, target="", connection_choice=None, message=None, verbose=True):
+def backup(c, target: str = "", connection_choice: str = None, message: str = None, verbose: bool = True):
     """Performs a backup operation using restic on a local or remote/cloud file system.
 
     Args:
         c (Context)
-        target (str): The path of the file or directory to backup. Defaults to an empty string.
+        target (str): The target of the backup (e.g. 'files', 'stream'; default is all types).
         connection_choice (str): The name of the connection to use for the backup.
             Defaults to None, which means the default connection will be used.
         message (str): A message to attach to the backup snapshot.
@@ -786,9 +795,9 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
     where the backup is stored.
 
     :type c: Context
-    :param connection_choice: the service where the files are backed up, e.g., 'local' or 'openstack'.
+    :param connection_choice: the service where the files are backed up, e.g., 'local' or 'os' (= openstack).
     :param snapshot: the ID where the files are backed up, default value is 'latest'.
-    :param target: the location where the backup should be restored.
+    :param target: The target of the backup (e.g. 'files', 'stream'; default is all types).
     :param verbose: display verbose logs (inv restore -v).
     :return: None
     """
@@ -817,21 +826,22 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
 
 
 @task(iterable=["tag"])
-def snapshots(c, connection_choice: str = None, tag: str = None, n: int = 1):
+def snapshots(c, connection_choice: str = None, tag: str = None, n: int = 1, verbose: bool = False):
     """
-    With this je can see per repo which repo is made when and where, the repo-id can be used at inv restore as an option
+    With this you can see per repo which repo is made when and where, the repo-id can be used at inv restore as an option
 
     :type c: Context
     :param connection_choice: service
     :param tag: files, stream ect
     :param n: amount of snapshot to view, default=1(latest)
+    :param verbose: show which commands are being executed?
     :return: None
     """
     # if tags is None set tag to default tags
     if tag is None:
         tag = ["files", "stream"]
 
-    cli_repo(connection_choice).snapshot(c, tags=tag, n=n)
+    cli_repo(connection_choice).snapshot(c, tags=tag, n=n, verbose=verbose)
 
 
 @task()
