@@ -1,18 +1,17 @@
-from collections import defaultdict, OrderedDict
-
-import invoke
-from invoke import task
-
+import abc
 import datetime
 import io
+import json
 import os
-from pathlib import Path
 import re
 import sys
 import typing
-import json
-from print_color import print
+from collections import OrderedDict, defaultdict
+from pathlib import Path
 
+import invoke
+from invoke import Context, task
+from print_color import print
 from tqdm import tqdm
 
 # the path where the restic command is going to be executed
@@ -21,24 +20,20 @@ DEFAULT_BACKUP_FOLDER = Path("captain-hooks")
 DOTENV = Path(".env")
 _dotenv_settings = {}
 
+T = typing.TypeVar("T")
 
-def fix_tags(tags):
+
+def fix_tags(tags: list[T | None]) -> list[T]:
     """
-    removes all None type elements from list
-    :param tags: list of string
-    :return:
+    Removes all None type elements from the input list.
+
+    :param tags: list of strings, some elements may be None
+    :return: list of strings with all None elements removed
     """
-    i = 0
-    while i < len(tags):
-        if tags[i] is not None:
-            i += 1
-        else:
-            del tags[i]
-
-    return tags
+    return [tag for tag in tags if tag is not None]
 
 
-class Repository:
+class Repository(abc.ABC):
     # _targets: a list of file and directory paths that should be included in the backup.
     _targets = [".env", "./backup"]
     # _excluded: a list of file and directory paths that should be excluded from the backup.
@@ -57,19 +52,19 @@ class Repository:
 
     def __init__(self) -> None:
         super().__init__()
-        self._restichostname = read_dotenv(DOTENV).get(
-            "RESTICHOSTNAME"
-        )  # or None if it is not there
+        self._restichostname = read_dotenv(DOTENV).get("RESTICHOSTNAME")  # or None if it is not there
 
     @property
     def uri(self):
         """Return the prefix required for restic to indicate the protocol, for example sftp:hostname:"""
         raise NotImplementedError("Prefix unknown in base class")
 
+    @abc.abstractmethod
     def setup(self):
         """Ensure that the settings are in the .env file"""
         raise NotImplementedError("Setup undefined")
 
+    @abc.abstractmethod
     def prepare_for_restic(self, c):
         """No environment variables need to be defined for local"""
         raise NotImplementedError("Prepare for restic undefined")
@@ -135,7 +130,7 @@ class Repository:
 
     def execute_files(
         self,
-        c: invoke.context.Context,
+        c: Context,
         target: str,
         verb: str,
         verbose: bool,
@@ -176,7 +171,8 @@ class Repository:
             if verbose:
                 print("\033[1m running", file, "\033[0m")
 
-            # run the script by default with pty=True, when the script crashes run the script again but then grab the stdout
+            # run the script by default with pty=True,
+            # when the script crashes run the script again but then grab the stdout
 
             try:
                 print(f"{file} output:")
@@ -203,7 +199,7 @@ class Repository:
             c.run(
                 f"restic {self.hostarg} -r {self.uri} backup --tag {','.join(tags)} --stdin --stdin-filename message",
                 in_stream=io.StringIO(message),
-                hide=True
+                hide=True,
             )
 
         print("\n\nfile status codes:")
@@ -277,19 +273,13 @@ class Repository:
             # snapshot: re.findall(rf"^{snapshot}", stdout) for snapshot in snapshots
         }
 
-        message_snapshot_per_snapshot = defaultdict(
-            list
-        )  # key is source, value is snapshot containing the message
+        message_snapshot_per_snapshot = defaultdict(list)  # key is source, value is snapshot containing the message
         for snapshot, possible_tag_names in main_tag_per_snapshot.items():
             tag_name = possible_tag_names[0]
             if tag_name not in ["message"]:
                 continue
-            for _, is_message_for_snapshot_id in re.findall(
-                rf"\n{snapshot}.*(\n\s+(.*)\n)+", stdout
-            ):
-                message_snapshot_per_snapshot[is_message_for_snapshot_id].append(
-                    snapshot
-                )
+            for _, is_message_for_snapshot_id in re.findall(rf"\n{snapshot}.*(\n\s+(.*)\n)+", stdout):
+                message_snapshot_per_snapshot[is_message_for_snapshot_id].append(snapshot)
 
         for snapshot, message_snapshots in message_snapshot_per_snapshot.items():
             # print all Restic messages
@@ -299,9 +289,7 @@ class Repository:
                 warn=True,
             ).stdout
             message = restore_output.strip()
-            stdout = re.sub(
-                rf"\n{snapshot}(.*)\n", rf"\n{snapshot}\1 : [{message}]\n", stdout
-            )
+            stdout = re.sub(rf"\n{snapshot}(.*)\n", rf"\n{snapshot}\1 : [{message}]\n", stdout)
 
 
 class LocalRepository(Repository):
@@ -579,7 +567,8 @@ class SwiftRepository(Repository):
 
 
 def set_env_value(path: Path, target: str, value: str) -> None:
-    """update/set environment variables in the .env file, keeping comments intact
+    """
+    update/set environment variables in the .env file, keeping comments intact
 
     set_env_value(Path('.env'), 'SCHEMA_VERSION', schemaversion)
 
@@ -674,24 +663,25 @@ def check_env(
     env = read_dotenv(path)
     if key in env:
         return env[key]
+
+    # get response value from prompt/input
+    # if response_value is empty make value default else value is response_value
+    value = input(f"Enter value for {key} ({comment})\n default=`{default}`: ").strip() or default
+    if value.startswith("~/") and Path(value).expanduser().exists():
+        value = str(Path(value).expanduser())
+    if prefix:
+        value = prefix + value
+    if postfix:
+        value += postfix
+
     with path.open(mode="r+") as env_file:
-        # get response value from prompt/input
-        response = input(f"Enter value for {key} ({comment})\n default=`{default}`: ")
-        # if response_value is none make value default else value is response_value
-        value = response.strip() or default
-        if value.startswith("~/") and Path(value).expanduser().exists():
-            value = Path(value).expanduser().__str__()
-        if prefix:
-            value = prefix + value
-        if postfix:
-            value += postfix
         env_file.seek(0, 2)
         # write key and value to .env file
         env_file.write(f"\n{key.upper()}={value}\n")
 
-        # update in memory too:
-        env[key] = value
-        return value
+    # update in memory too:
+    env[key] = value
+    return value
 
 
 # the order in which the backup will be saved
@@ -699,7 +689,7 @@ def check_env(
 # B2 is also very secure, only less
 # SFTP is the least secure, if were talking about remote saving
 # Local can be a good option, but if your pc got broken, you have lost your backup
-CONNECTION_CLASS_MAP = OrderedDict(
+CONNECTION_CLASS_MAP: OrderedDict[str, type[Repository]] = OrderedDict(
     os=SwiftRepository,
     b2=B2Repository,
     sftp=SFTPRepository,
@@ -707,7 +697,7 @@ CONNECTION_CLASS_MAP = OrderedDict(
 )
 
 
-def cli_repo(connection_choice=None, restichostname=None):
+def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repository:
     """
     Create a repository object and set up the connection to the backend.
     :param connection_choice: choose where you want to store the repo (local, SFTP, B2, swift)
@@ -717,6 +707,8 @@ def cli_repo(connection_choice=None, restichostname=None):
     env = read_dotenv(DOTENV)
     if restichostname:
         set_env_value(DOTENV, "RESTICHOSTNAME", restichostname)
+
+    connection_lowercase = ""
     if connection_choice is None:
         # search for the most important backup and use it as default
         for connection_choice in CONNECTION_CLASS_MAP.keys():
@@ -725,6 +717,11 @@ def cli_repo(connection_choice=None, restichostname=None):
                 break
     else:
         connection_lowercase = connection_choice.lower()
+
+    if connection_lowercase not in CONNECTION_CLASS_MAP:
+        options = ", ".join(list(CONNECTION_CLASS_MAP.keys()))
+        raise ValueError(f"Invalid connection type {connection_choice}. Please use one of {options}!")
+
     repoclass = CONNECTION_CLASS_MAP[connection_lowercase]
     print("Use connection: ", connection_lowercase)
     repo = repoclass()
@@ -750,6 +747,7 @@ def backup(c, target="", connection_choice=None, message=None, verbose=True):
     """Performs a backup operation using restic on a local or remote/cloud file system.
 
     Args:
+        c (Context)
         target (str): The path of the file or directory to backup. Defaults to an empty string.
         connection_choice (str): The name of the connection to use for the backup.
             Defaults to None, which means the default connection will be used.
@@ -780,13 +778,14 @@ def backup(c, target="", connection_choice=None, message=None, verbose=True):
 
 
 @task
-def restore(c, connection_choice=None, snapshot="latest", target="", verbose=True):
+def restore(c, connection_choice: str = None, snapshot: str = "latest", target: str = "", verbose: bool = True):
     """
     The restore function restores the latest backed-up files by default and puts them in a restore folder.
 
     IMPORTANT: please provide -t for the path where the restore should go. Also remember to include -c for the service
     where the backup is stored.
 
+    :type c: Context
     :param connection_choice: the service where the files are backed up, e.g., 'local' or 'openstack'.
     :param snapshot: the ID where the files are backed up, default value is 'latest'.
     :param target: the location where the backup should be restored.
@@ -800,19 +799,13 @@ def restore(c, connection_choice=None, snapshot="latest", target="", verbose=Tru
     c.run("docker-compose stop -t 1 pg-0 pg-1 pgpool", warn=True, hide=True)
 
     # Get the volumes that are being used.
-    docker_inspect: invoke.Result = c.run(
-        "docker inspect pg-0 pg-1", hide=True, warn=True
-    )
+    docker_inspect: invoke.Result = c.run("docker inspect pg-0 pg-1", hide=True, warn=True)
     if docker_inspect.ok:
         # Only if ok, because if pg-0 and pg-1 do not exist, this does not exist either, and nothing needs to be removed
         inspected = json.loads(docker_inspect.stdout)
         volumes_to_remove = []
         for service in inspected:
-            volumes_to_remove.extend(
-                mount["Name"]
-                for mount in service["Mounts"]
-                if mount["Type"] == "volume"
-            )
+            volumes_to_remove.extend(mount["Name"] for mount in service["Mounts"] if mount["Type"] == "volume")
         # Remove the containers before a volume can be removed.
         c.run("docker-compose rm -f pg-0 pg-1")
         # Remove the volumes.
@@ -824,9 +817,11 @@ def restore(c, connection_choice=None, snapshot="latest", target="", verbose=Tru
 
 
 @task(iterable=["tag"])
-def snapshots(c, connection_choice=None, tag=None, n=1):
+def snapshots(c, connection_choice: str = None, tag: str = None, n: int = 1):
     """
     With this je can see per repo which repo is made when and where, the repo-id can be used at inv restore as an option
+
+    :type c: Context
     :param connection_choice: service
     :param tag: files, stream ect
     :param n: amount of snapshot to view, default=1(latest)
@@ -840,13 +835,14 @@ def snapshots(c, connection_choice=None, tag=None, n=1):
 
 
 @task()
-def run(c, connection_choice=None):
+def run(c, connection_choice: str = None):
     """
     This function prepares for restic and runs the input command until the user types "exit".
 
-    :param connection_choice (str): The connection name of the repository.
+    :type c: Context
+    :param connection_choice: The connection name of the repository.
     """
 
     cli_repo(connection_choice).prepare_for_restic(c)
-    while (command:=input("> ")) != "exit":
+    while (command := input("> ")) != "exit":
         print(c.run(command, hide=True, warn=True, pty=True))
