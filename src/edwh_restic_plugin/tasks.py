@@ -284,7 +284,7 @@ class Repository(abc.ABC):
         message_snapshot_per_snapshot = defaultdict(list)  # key is source, value is snapshot containing the message
         for snapshot, possible_tag_names in main_tag_per_snapshot.items():
             tag_name = possible_tag_names[0]
-            if tag_name == "message":
+            if tag_name != "message":
                 continue
             for _, is_message_for_snapshot_id in re.findall(rf"\n{snapshot}.*(\n\s+(.*)\n)+", stdout):
                 message_snapshot_per_snapshot[is_message_for_snapshot_id].append(snapshot)
