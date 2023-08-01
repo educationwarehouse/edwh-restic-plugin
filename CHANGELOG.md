@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.3.3-beta.2 (2023-08-01)
+### Fix
+* Debug restic.snapshots ([`ee153e4`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/ee153e495c60696b12d38496d80817c37394f217))
+
 ## v0.3.3-beta.1 (2023-08-01)
 
 
