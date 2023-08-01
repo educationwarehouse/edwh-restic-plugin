@@ -265,10 +265,14 @@ class Repository(abc.ABC):
         command = f"restic {self.hostarg} -r {self.uri} snapshots --latest {n} {tags} -c"
         if verbose:
             print(command, file=sys.stderr)
+
         stdout = c.run(
             command,
             hide=True,
         ).stdout
+
+        if verbose:
+            print(stdout, file=sys.stderr)
 
         snapshot_lines = re.findall(r"^([0-9a-z]{8})\s", stdout, re.MULTILINE)
         main_tag_per_snapshot = {
@@ -281,6 +285,8 @@ class Repository(abc.ABC):
         for snapshot, possible_tag_names in main_tag_per_snapshot.items():
             tag_name = possible_tag_names[0]
             if tag_name not in ["message"]:
+                if verbose:
+                    print(tag_name, file=sys.stderr)
                 continue
             for _, is_message_for_snapshot_id in re.findall(rf"\n{snapshot}.*(\n\s+(.*)\n)+", stdout):
                 message_snapshot_per_snapshot[is_message_for_snapshot_id].append(snapshot)
@@ -296,8 +302,16 @@ class Repository(abc.ABC):
                 hide=True,
                 warn=True,
             ).stdout
+
+            if verbose:
+                print(restore_output, file=sys.stderr)
+
             message = restore_output.strip()
             stdout = re.sub(rf"\n{snapshot}(.*)\n", rf"\n{snapshot}\1 : [{message}]\n", stdout)
+
+            if verbose:
+                print('---\n', file=sys.stderr)
+
             print(stdout)
 
 
