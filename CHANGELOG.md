@@ -4,22 +4,11 @@
 
 ## v0.3.3 (2023-08-01)
 
-
-## v0.3.3-beta.5 (2023-08-01)
-
-
-## v0.3.3-beta.4 (2023-08-01)
 ### Fix
-* Hide 'message' tagged entries from restic.snapshots ([`16702f8`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/16702f87f773a58abba1770e19faa0867ccfe480))
+* restic.snapshots prints again ([`ee153e4`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/ee153e495c60696b12d38496d80817c37394f217))
 
-## v0.3.3-beta.3 (2023-08-01)
-
-
-## v0.3.3-beta.2 (2023-08-01)
-### Fix
-* Debug restic.snapshots ([`ee153e4`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/ee153e495c60696b12d38496d80817c37394f217))
-
-## v0.3.3-beta.1 (2023-08-01)
+### Refactor
+* improved minor issues with code, better hints etc.
 
 
 ## v0.3.2 (2023-06-27)
