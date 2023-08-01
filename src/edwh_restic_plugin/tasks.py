@@ -264,7 +264,7 @@ class Repository(abc.ABC):
         tags = "--tag " + " --tag ".join(tags) if tags else ""
         command = f"restic {self.hostarg} -r {self.uri} snapshots --latest {n} {tags} -c"
         if verbose:
-            print(command, file=sys.stderr)
+            print("$", command, file=sys.stderr)
 
         stdout = c.run(
             command,
@@ -284,9 +284,7 @@ class Repository(abc.ABC):
         message_snapshot_per_snapshot = defaultdict(list)  # key is source, value is snapshot containing the message
         for snapshot, possible_tag_names in main_tag_per_snapshot.items():
             tag_name = possible_tag_names[0]
-            if tag_name not in ["message"]:
-                if verbose:
-                    print(tag_name, file=sys.stderr)
+            if tag_name == "message":
                 continue
             for _, is_message_for_snapshot_id in re.findall(rf"\n{snapshot}.*(\n\s+(.*)\n)+", stdout):
                 message_snapshot_per_snapshot[is_message_for_snapshot_id].append(snapshot)
@@ -295,7 +293,7 @@ class Repository(abc.ABC):
             # print all Restic messages
             command = f"restic {self.hostarg} -r {self.uri} dump {message_snapshots[0]} --tag message message"
             if verbose:
-                print(command, file=sys.stderr)
+                print("$", command, file=sys.stderr)
 
             restore_output = c.run(
                 command,
@@ -312,7 +310,7 @@ class Repository(abc.ABC):
             if verbose:
                 print('---\n', file=sys.stderr)
 
-            print(stdout)
+        print(stdout)
 
 
 class LocalRepository(Repository):
