@@ -2,6 +2,13 @@
 
 <!--next-version-placeholder-->
 
+## v0.3.4 (2023-09-27)
+### Fix
+* Use dynamic `docker compose` command via edwh (pass --old-compose to use `docker-compose` instead) ([`a3214f8`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a3214f82e8260842d296ea1012d553faa0c36e94))
+
+### Documentation
+* **changelog:** Merge beta release logs into 0.3.3 ([`fa1afe3`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/fa1afe3272ec4a52e58779e8dbe08e9a791f006a))
+
 ## v0.3.3 (2023-08-01)
 
 ### Fix
