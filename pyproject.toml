@@ -12,6 +12,7 @@ license = "MIT"
 keywords = []
 authors = [
   { name = "Remco Boerma", email = "remco.b@educationwarehouse.nl" },
+  { name = "Robin van der Noord", email = "robin.vdn@educationwarehouse.nl" },
 ]
 classifiers = [
   "Development Status :: 4 - Beta",
@@ -26,7 +27,8 @@ dependencies = [
   'invoke',
   'tqdm',
   'print-color',
-  'diceware'
+  'diceware',
+  'edwh',
 ]
 
 [project.optional-dependencies]

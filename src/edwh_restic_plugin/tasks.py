@@ -10,6 +10,7 @@ from collections import OrderedDict, defaultdict
 from pathlib import Path
 
 import invoke
+from edwh.tasks import DOCKER_COMPOSE
 from invoke import Context, task
 from print_color import print
 from tqdm import tqdm
@@ -750,7 +751,7 @@ def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repos
     return repo
 
 
-@task
+@task(aliases=("setup", "init"))
 def configure(c, connection_choice=None, restichostname=None):
     """Setup or update the backup command for your environment.
     connection_choice: choose where you want to store the repo (local, SFTP, B2, swift)
@@ -817,7 +818,7 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
     # retrieved from the repository.
     # 'which_restore' is a user input to enable restoring an earlier backup (default = latest).
     # Stop the postgres services.
-    c.run("docker-compose stop -t 1 pg-0 pg-1 pgpool", warn=True, hide=True)
+    c.run(f"{DOCKER_COMPOSE} stop -t 1 pg-0 pg-1 pgpool", warn=True, hide=True)
 
     # Get the volumes that are being used.
     docker_inspect: invoke.Result = c.run("docker inspect pg-0 pg-1", hide=True, warn=True)
@@ -828,7 +829,7 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
         for service in inspected:
             volumes_to_remove.extend(mount["Name"] for mount in service["Mounts"] if mount["Type"] == "volume")
         # Remove the containers before a volume can be removed.
-        c.run("docker-compose rm -f pg-0 pg-1")
+        c.run(f"{DOCKER_COMPOSE} rm -f pg-0 pg-1")
         # Remove the volumes.
         for volume_name in volumes_to_remove:
             c.run(f"docker volume rm {volume_name}")
