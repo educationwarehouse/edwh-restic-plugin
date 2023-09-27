@@ -5,9 +5,6 @@
 ## v0.4.0 (2023-09-27)
 ### Fix
 * Exclude venv from git and pip build ([`e15cce6`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/e15cce677b34a2b5b6c954bb4c4ff07727cda6c7))
-
-## v0.3.4 (2023-09-27)
-### Fix
 * Use dynamic `docker compose` command via edwh (pass --old-compose to use `docker-compose` instead) ([`a3214f8`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a3214f82e8260842d296ea1012d553faa0c36e94))
 
 ### Documentation
