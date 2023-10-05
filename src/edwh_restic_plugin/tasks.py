@@ -6,11 +6,13 @@ import os
 import re
 import sys
 import typing
+import warnings
 from collections import OrderedDict, defaultdict
 from pathlib import Path
 
 import invoke
 from edwh.tasks import DOCKER_COMPOSE
+from edwh.helpers import generate_password
 from invoke import Context, task
 from print_color import print
 from tqdm import tqdm
@@ -69,6 +71,9 @@ class Repository(abc.ABC):
     def prepare_for_restic(self, c):
         """No environment variables need to be defined for local"""
         raise NotImplementedError("Prepare for restic undefined")
+        # prepare_for_restic implementations should probably start with:
+        # env = read_dotenv(DOTENV)
+        # os.environ.update(env)
 
     def configure(self, c):
         """Configure the backup environment variables."""
@@ -331,13 +336,15 @@ class LocalRepository(Repository):
         self.password = check_env(
             DOTENV,
             "LOCAL_PASSWORD",
-            default=None,
+            default=generate_password(silent=True),
             comment="Create a password, keep it safe.",
         )
 
     def prepare_for_restic(self, c):
         """No environment variables need be defined for local"""
         env = read_dotenv(DOTENV)
+        os.environ.update(env)
+
         self.name = env["LOCAL_NAME"]
         os.environ["HOST"] = self.hostarg
         os.environ["URI"] = self.uri
@@ -386,6 +393,8 @@ class SFTPRepository(Repository):
     def prepare_for_restic(self, c):
         """read out of .env file"""
         env = read_dotenv(DOTENV)
+        os.environ.update(env)
+
         self.name = env["SFTP_NAME"]
         self.password = env["SFTP_PASSWORD"]
         self.hostname = env["SFTP_HOSTNAME"]
@@ -462,6 +471,8 @@ class B2Repository(Repository):
     def prepare_for_restic(self, c):
         """read variables out of .env file"""
         env = read_dotenv(DOTENV)
+        os.environ.update(env)
+
         self.name = env["B2_NAME"]
         self.password = env["B2_PASSWORD"]
         self.bucket_name = env["B2_BUCKETNAME"]
@@ -564,6 +575,8 @@ class SwiftRepository(Repository):
     def prepare_for_restic(self, c):
         """read variables out of .env file"""
         env = read_dotenv(DOTENV)
+        os.environ.update(env)
+
         self.name = env["OS_NAME"]
         self.container_name = env["OS_CONTAINERNAME"]
         os.environ["OS_USERNAME"] = env["OS_USERNAME"]
@@ -674,27 +687,33 @@ def read_dotenv(path: Path) -> dict:
 def check_env(
     path: Path,
     key: str,
-    default: typing.Optional[str],
+    default: str | None,
     comment: str,
-    prefix: str | None = None,
-    postfix: str | None = None,
+    prefix: str = None,
+    suffix: str = None,
+    postfix: str = None,
 ):
     """
     Test if key is in .env file path, appends prompted or default value if missing.
     """
+    if postfix:
+        warnings.warn("`postfix` option passed. Please use `suffix` instead!", category=DeprecationWarning)
+
+    suffix = suffix or postfix
+
     env = read_dotenv(path)
     if key in env:
         return env[key]
 
     # get response value from prompt/input
     # if response_value is empty make value default else value is response_value
-    value = input(f"Enter value for {key} ({comment})\n default=`{default}`: ").strip() or default
+    value = input(f"Enter value for {key} ({comment})\n default=`{default}`: ").strip() or default or ""
     if value.startswith("~/") and Path(value).expanduser().exists():
         value = str(Path(value).expanduser())
     if prefix:
         value = prefix + value
-    if postfix:
-        value += postfix
+    if suffix:
+        value += suffix
 
     with path.open(mode="r+") as env_file:
         env_file.seek(0, 2)
