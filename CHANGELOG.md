@@ -2,6 +2,13 @@
 
 <!--next-version-placeholder-->
 
+## v0.5.0 (2023-10-05)
+### Feature
+* Captain hooks scripts now also have access to .env settings ([`a92e4c5`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a92e4c588249292f30fe5969d73f79ddf890d6fe))
+
+### Documentation
+* Manually release 0.4.0 ([`606ec48`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/606ec48348ffce6965862a3a33865572b659233e))
+
 ## v0.4.0 (2023-09-27)
 ### Fix
 * Exclude venv from git and pip build ([`e15cce6`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/e15cce677b34a2b5b6c954bb4c4ff07727cda6c7))
