@@ -37,7 +37,7 @@ and remotely to various systems and providers such as Amazon, REST, Minio, Wasab
 Azure, Google, and rclone. 
 
 ## Configuring `edwh restic.*`
-For EDWH, they use local storage, SFTP, Backblaze, and Openstack.
+For EDWH, they use local storage, SFTP, Backblaze, S3, and Openstack.
 
 ### Creating a new repository
 To create a new repository, you need the local path to the folder where the backup should be stored,
