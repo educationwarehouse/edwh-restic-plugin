@@ -1,3 +1,4 @@
+import os
 import warnings
 from pathlib import Path
 from typing import Optional
@@ -132,5 +133,5 @@ def check_env(
         env_file.write(f"\n{key.upper()}={value}\n")
 
     # update in memory too:
-    env[key] = value
+    os.environ[key] = env[key] = value
     return value

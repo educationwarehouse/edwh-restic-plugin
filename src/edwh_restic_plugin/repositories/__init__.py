@@ -106,7 +106,7 @@ class Repository(abc.ABC):
         postfix: str = None,
         path: Path = None,
     ):
-        return check_env(
+        value = check_env(
             key=key,
             default=default,
             comment=comment,
@@ -115,6 +115,10 @@ class Repository(abc.ABC):
             postfix=postfix,
             path=path or self._env_path,
         )
+
+        # update local variant too:
+        self.env_config[key] = value
+        return value
 
     def _restic_self_update(self, c: Context) -> None:
         if not c.run("restic self-update", hide=True, warn=True):
