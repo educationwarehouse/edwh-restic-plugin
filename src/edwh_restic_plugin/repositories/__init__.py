@@ -1,4 +1,5 @@
 import abc
+import contextlib
 import datetime
 import heapq
 import importlib
@@ -13,6 +14,7 @@ from pathlib import Path
 
 import invoke
 from invoke import Context
+from invoke.exceptions import AuthFailure
 from print_color import print  # fixme: replace with termcolor
 from tqdm import tqdm
 from typing_extensions import NotRequired
@@ -25,6 +27,47 @@ DEFAULT_BACKUP_FOLDER = Path("captain-hooks")
 
 
 class Repository(abc.ABC):
+    ####################
+    # IMPLEMENT THESE: #
+    ####################
+
+    @abc.abstractmethod
+    def setup(self) -> None:
+        """Ensure that the settings are in the .env file"""
+        # you probably want some `self.check_env(...)` statements here
+        # You need at least a <REPO>_NAME and <REPO>_PASSWORD variable,
+        # where <REPO> is the name of your Restic repository type.
+        raise NotImplementedError("Setup undefined")
+
+    @abc.abstractmethod
+    def prepare_for_restic(self, c: Context) -> None:
+        """No environment variables need to be defined for local"""
+        # prepare_for_restic implementations should probably start with:
+        # env = self.env_config
+        # os.environ["RESTIC_REPOSITORY"] = self.uri
+        # os.environ["RESTIC_PASSWORD"] = env["<REPO>_PASSWORD"]
+        raise NotImplementedError("Prepare for restic undefined")
+
+    @property
+    @abc.abstractmethod
+    def uri(self) -> str:
+        """Return the prefix required for restic to indicate the protocol, for example sftp:hostname:"""
+        raise NotImplementedError("Prefix unknown in base class")
+
+    ###########################
+    # END OF NOT IMPLEMENTED, #
+    #    START BASE CLASS:    #
+    ###########################
+
+    def __repr__(self):
+        cls = self.__class__.__name__
+        try:
+            uri = self.uri
+        except Exception:
+            uri = "?"
+
+        return f"<{cls}({uri})>"
+
     # _targets: a list of file and directory paths that should be included in the backup.
     _targets = [".env", "./backup"]
     # _excluded: a list of file and directory paths that should be excluded from the backup.
@@ -46,29 +89,12 @@ class Repository(abc.ABC):
 
     def __init__(self, env_path: Path = DOTENV) -> None:
         super().__init__()
-        print("repo init", self)
+        print("start repo init", self.__class__.__name__)
         self._env_path = env_path
         self.env_config = env = read_dotenv(env_path)
         os.environ |= env
         self._restichostname = env.get("RESTICHOSTNAME")  # or None if it is not there
-
-    @property
-    def uri(self):
-        """Return the prefix required for restic to indicate the protocol, for example sftp:hostname:"""
-        raise NotImplementedError("Prefix unknown in base class")
-
-    @abc.abstractmethod
-    def setup(self):
-        """Ensure that the settings are in the .env file"""
-        raise NotImplementedError("Setup undefined")
-
-    @abc.abstractmethod
-    def prepare_for_restic(self, c):
-        """No environment variables need to be defined for local"""
-        raise NotImplementedError("Prepare for restic undefined")
-        # prepare_for_restic implementations should probably start with:
-        # env = read_dotenv(DOTENV)
-        # os.environ.update(env)
+        print("end repo init", self)
 
     def check_env(
         self,
@@ -90,12 +116,20 @@ class Repository(abc.ABC):
             path=path or self._env_path,
         )
 
-    def configure(self, c):
+    def _restic_self_update(self, c: Context) -> None:
+        if not c.run("restic self-update", hide=True, warn=True):
+            # done
+            return
+
+        with contextlib.suppress(AuthFailure):
+            return c.sudo("restic self-update", hide=True, warn=True)
+
+    def configure(self, c: Context):
         """Configure the backup environment variables."""
         self.prepare_for_restic(c)
         print("configure")
         # First, make sure restic is up-to-date
-        c.run("sudo restic self-update", hide=True, warn=True)
+        self._restic_self_update(c)
         # This is the command used to configure the environment variables properly.
         c.run(f"restic init --repository-version 2 -r {self.uri}")
 
