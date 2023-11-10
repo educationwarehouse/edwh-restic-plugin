@@ -59,6 +59,20 @@ class Repository(abc.ABC):
     #    START BASE CLASS:    #
     ###########################
 
+    def _add_missing_boilerpalte_restic_vars(self):
+        """
+        HOST, URI, RESTIC_REPOSITORY and RESTIC_HOST are usually the same so if those aren't set yet, \
+            use a sensible default
+        """
+        os.environ["HOST"] = os.environ.get("HOST") or self.hostarg
+        os.environ["URI"] = os.environ.get("URI") or self.uri
+        os.environ["RESTIC_HOST"] = os.environ.get("RESTIC_HOST") or self.hostarg
+        os.environ["RESTIC_REPOSITORY"] = os.environ.get("RESTIC_REPOSITORY") or self.uri
+
+    def prepare_env_for_restic(self, c: Context):
+        self.prepare_for_restic(c)  # <- abstract method used by all Repositories
+        self._add_missing_boilerpalte_restic_vars()  # <- add $HOST and other common variables that could be missing
+
     def __repr__(self):
         cls = self.__class__.__name__
         try:
@@ -130,7 +144,7 @@ class Repository(abc.ABC):
 
     def configure(self, c: Context):
         """Configure the backup environment variables."""
-        self.prepare_for_restic(c)
+        self.prepare_env_for_restic(c)
         print("configure")
         # First, make sure restic is up-to-date
         self._restic_self_update(c)
@@ -207,7 +221,7 @@ class Repository(abc.ABC):
         If not provided, the current local time is used. Defaults to None.
         - snapshot (str, optional): The snapshot to be used for the backup. Defaults to "latest".
         """
-        self.prepare_for_restic(c)
+        self.prepare_env_for_restic(c)
 
         # set snapshot available in environment for sh files
         os.environ["SNAPSHOT"] = snapshot
@@ -300,7 +314,7 @@ class Repository(abc.ABC):
         """
         Checks the integrity of the backup repository.
         """
-        self.prepare_for_restic(c)
+        self.prepare_env_for_restic(c)
         c.run(f"restic {self.hostarg} -r {self.uri} check --read-data")
 
     def snapshot(self, c: Context, tags: list[str] = None, n: int = 2, verbose: bool = False):
@@ -319,7 +333,7 @@ class Repository(abc.ABC):
         if tags is None:
             tags = ["files", "stream"]
 
-        self.prepare_for_restic(c)
+        self.prepare_env_for_restic(c)
         tags_flag = "--tag " + " --tag ".join(tags) if tags else ""
         command = f"restic {self.hostarg} -r {self.uri} snapshots --latest {n} {tags_flag} -c"
         if verbose:

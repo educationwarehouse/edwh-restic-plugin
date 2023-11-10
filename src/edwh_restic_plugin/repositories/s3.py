@@ -8,7 +8,7 @@ from . import Repository, register
 
 @register()
 class S3Repository(Repository):
-    # todo: currently based on Openstack s3 compat, so check with actual S3!
+    # todo: currently tested on Oracle s3 compat and other non-Amazon S3 compatible services, so check with actual S3!
 
     def setup(self) -> None:
         self.check_env(
