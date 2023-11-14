@@ -2,6 +2,9 @@
 
 <!--next-version-placeholder-->
 
+## v0.6.0 (2023-11-14)
+
+
 ## v0.6.0-beta.1 (2023-11-14)
 ### Feature
 * **repo:** Added s3 and s3-compat Oracle storage ([`fbba0ca`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/fbba0caac3b145943e61ba94018f74a5eb306782))
