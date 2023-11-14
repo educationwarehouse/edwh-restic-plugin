@@ -2,6 +2,17 @@
 
 <!--next-version-placeholder-->
 
+## v0.6.0-beta.1 (2023-11-14)
+### Feature
+* **repo:** Added s3 and s3-compat Oracle storage ([`fbba0ca`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/fbba0caac3b145943e61ba94018f74a5eb306782))
+
+### Fix
+* Update repository local settings on check_env ([`9c6e3b4`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/9c6e3b4f3ade9224b48fe63cb4734c3855826076))
+* **self-update:** Improved restic self-update handling ([`a69978c`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a69978c5b4040fec04fb2a0debbf04b868d29d98))
+
+### Documentation
+* Mentioned S3 ([`a782daf`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a782daf0146c808c4a259e1459a585d24f132f9f))
+
 ## v0.5.0 (2023-10-05)
 ### Feature
 * Captain hooks scripts now also have access to .env settings ([`a92e4c5`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a92e4c588249292f30fe5969d73f79ddf890d6fe))
