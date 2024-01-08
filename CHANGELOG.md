@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.6.1 (2024-01-08)
+### Fix
+* Restic wordt nu geinstalleerd als die nog niet gevonden kan worden ([`70a25e3`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/70a25e3679580d5b3c71f2523d62b7b65bf2f67f))
+
 ## v0.6.0 (2023-11-14)
 ### Feature
 * **repo:** Added s3 and s3-compat Oracle storage ([`fbba0ca`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/fbba0caac3b145943e61ba94018f74a5eb306782))
