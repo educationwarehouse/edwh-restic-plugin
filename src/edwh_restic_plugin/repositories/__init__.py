@@ -20,7 +20,7 @@ from tqdm import tqdm
 from typing_extensions import NotRequired
 
 from ..env import DOTENV, check_env, read_dotenv
-from ..helpers import camel_to_snake, fix_tags
+from ..helpers import _require_restic, camel_to_snake, fix_tags
 
 # the path where the restic command is going to be executed
 DEFAULT_BACKUP_FOLDER = Path("captain-hooks")
@@ -101,8 +101,12 @@ class Repository(abc.ABC):
     _env_path: Path
     env_config: dict[str, str]
 
+    def _require_restic(self):
+        _require_restic()
+
     def __init__(self, env_path: Path = DOTENV) -> None:
         super().__init__()
+        self._require_restic()
         print("start repo init", self.__class__.__name__)
         self._env_path = env_path
         self.env_config = env = read_dotenv(env_path)

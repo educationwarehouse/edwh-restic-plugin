@@ -7,6 +7,7 @@ from invoke import task
 from print_color import print  # fixme: replace with termcolor
 
 from .env import DOTENV, read_dotenv, set_env_value
+from .helpers import _require_restic
 from .repositories import Repository, registrations
 from .types import DockerContainer
 
@@ -45,6 +46,11 @@ def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repos
     repo = repoclass()
     repo.setup()
     return repo
+
+
+@task
+def require_restic(c):
+    _require_restic(c)
 
 
 @task(aliases=("setup", "init"))
@@ -154,7 +160,7 @@ def snapshots(c, connection_choice: str = None, tag: list[str] = None, n: int = 
     cli_repo(connection_choice).snapshot(c, tags=tag, n=n, verbose=verbose)
 
 
-@task()
+@task(pre=[require_restic])
 def run(c, connection_choice: str = None):
     """
     This function prepares for restic and runs the input command until the user types "exit".
