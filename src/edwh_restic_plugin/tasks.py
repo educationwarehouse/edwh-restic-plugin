@@ -1,4 +1,5 @@
 import json
+import os
 import typing
 
 import invoke
@@ -172,3 +173,19 @@ def run(c, connection_choice: str = None):
     cli_repo(connection_choice).prepare_for_restic(c)
     while (command := input("> ")) != "exit":
         print(c.run(command, hide=True, warn=True, pty=True))
+
+
+@task()
+def env(c, connection_choice: str = None):
+    """
+
+    :type c: Context
+    :param connection_choice: The connection name of the repository.
+    """
+    from copy import deepcopy
+    old = deepcopy(os.environ)
+    cli_repo(connection_choice).prepare_for_restic(c)
+    new = os.environ
+    for k,v in new.items():
+        if k not in old or old[k] != v:
+            print(f"export {k.upper()}={v}")
