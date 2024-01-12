@@ -9,7 +9,7 @@ from print_color import print  # fixme: replace with termcolor
 from .env import DOTENV, read_dotenv, set_env_value
 from .helpers import _require_restic
 from .repositories import Repository, registrations
-from .types import DockerContainer
+from .restictypes import DockerContainer
 
 if typing.TYPE_CHECKING:
     from invoke import Context  # noqa: F401 - unused is ok for type checking
