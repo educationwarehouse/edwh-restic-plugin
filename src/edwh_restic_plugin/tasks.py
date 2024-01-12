@@ -175,6 +175,7 @@ def run(c, connection_choice: str = None):
         print(c.run(command, hide=True, warn=True, pty=True))
 
 
+# TODO: needs to be tested
 @task()
 def env(c, connection_choice: str = None):
     """
