@@ -2,6 +2,18 @@
 
 <!--next-version-placeholder-->
 
+## v0.7.0 (2024-02-23)
+### Feature
+* `env` functie toegevoegd om zo environment variabelen te printen via de cmd ([`a57fa1a`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a57fa1a46f01311e95f364bc4d0d3575de7afa46))
+
+### Fix
+* Auto-create env file if missing; fix heapq error for duplicate priorities (Repository instances were sortable but subclasses were not) ([`4f1d2e2`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/4f1d2e2e07b40b5511a3bcda17a8a4667d7766ed))
+* Types moest hernoemd worden ([`9dd7960`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/9dd7960e52d970c6e958d5b7bcbed9f069b914f8))
+* Typing-extensions toegevoegd aan dependencies ([`bf0af9d`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/bf0af9de119508fba1f152b7b35cef9c40ba7f61))
+
+### Documentation
+* Moet nog getest worden ([`c54254d`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/c54254d454205053c44e9efe24ae918f47d74151))
+
 ## v0.6.1 (2024-01-08)
 ### Fix
 * Restic wordt nu geinstalleerd als die nog niet gevonden kan worden ([`70a25e3`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/70a25e3679580d5b3c71f2523d62b7b65bf2f67f))
