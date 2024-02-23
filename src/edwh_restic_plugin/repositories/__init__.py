@@ -26,7 +26,22 @@ from ..helpers import _require_restic, camel_to_snake, fix_tags
 DEFAULT_BACKUP_FOLDER = Path("captain-hooks")
 
 
-class Repository(abc.ABC):
+class SortableMeta(abc.ABCMeta):
+    """
+    Allows sorting the class objects (not instances), which is useful for storing the class in a heapq.
+
+    The sort actually doesn't do anything, so you should store a tuple with a priority as the first item.
+    The class can then be included simply for lookup, not for any sorting purposes.
+    """
+
+    def __lt__(self, other: typing.Any) -> bool:
+        return False
+
+    def __gt__(self, other: typing.Any) -> bool:
+        return False
+
+
+class Repository(abc.ABC, metaclass=SortableMeta):
     ####################
     # IMPLEMENT THESE: #
     ####################
@@ -107,6 +122,7 @@ class Repository(abc.ABC):
     def __init__(self, env_path: Path = DOTENV) -> None:
         super().__init__()
         self._require_restic()
+        env_path.touch(exist_ok=True)
         print("start repo init", self.__class__.__name__)
         self._env_path = env_path
         self.env_config = env = read_dotenv(env_path)
