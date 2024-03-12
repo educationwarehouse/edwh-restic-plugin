@@ -44,4 +44,4 @@ class LocalRepository(Repository):
 
         The function returns the value of the 'name' attribute, which represents the URI of the class instance.
         """
-        return self.name
+        return getattr(self, "name", None) or self.env_config.get("LOCAL_NAME")

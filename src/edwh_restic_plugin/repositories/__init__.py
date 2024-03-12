@@ -267,20 +267,13 @@ class Repository(abc.ABC, metaclass=SortableMeta):
             # run the script by default with pty=True,
             # when the script crashes run the script again but then grab the stdout
 
+            print(f"{file} output: " if verbose else "", file=sys.stderr)
             try:
-                print(f"{file} output:")
-                ran_script: invoke.runners.Result = c.run(file, hide=True, pty=True)
+                ran_script: invoke.runners.Result = c.run(file, hide=not verbose, pty=True)
                 file_codes.append(0)
             except invoke.exceptions.UnexpectedExit as e:
                 ran_script = e.result
                 file_codes.append(e.result.exited)
-
-            if verbose:
-                print(f"{file} output:")
-                if ran_script.stdout:
-                    print(f"stdout:{ran_script.stdout}")
-                else:
-                    print("no output found!")
 
             snapshot = self.get_snapshot_from(ran_script.stdout)
             snapshots_created.append(snapshot)
