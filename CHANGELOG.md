@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.7.1 (2024-03-15)
+### Fix
+* Output stdout and stderr live (instead of afterwards) ([`476132f`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/476132fbb0ef2ea3ade3cc5cbc7cce1dfaa319a1))
+
 ## v0.7.0 (2024-02-23)
 ### Feature
 * `env` functie toegevoegd om zo environment variabelen te printen via de cmd ([`a57fa1a`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/a57fa1a46f01311e95f364bc4d0d3575de7afa46))
