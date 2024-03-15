@@ -2,6 +2,10 @@
 
 <!--next-version-placeholder-->
 
+## v0.7.2 (2024-03-15)
+### Fix
+* **hooks:** Show exit code on file execution error ([`15fb3f6`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/15fb3f60b16cd0d2bb4cfd71e948e67dadbfb8a5))
+
 ## v0.7.1 (2024-03-15)
 ### Fix
 * Output stdout and stderr live (instead of afterwards) ([`476132f`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/476132fbb0ef2ea3ade3cc5cbc7cce1dfaa319a1))
