@@ -294,7 +294,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
             if status_code == 0:
                 print(filename, tag="success", tag_color="green")
             else:
-                print( filename, tag=f"failure ({status_code})", tag_color="red")
+                print(filename, tag=f"failure ({status_code})", tag_color="red")
 
         if worst_status_code := max(file_codes) > 0:
             exit(worst_status_code)
