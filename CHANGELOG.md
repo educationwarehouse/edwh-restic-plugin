@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.7.3 (2024-04-12)
+
+### Fix
+
+* Add `edwh.require_sudo` to improve sudo password prompting ([`bf77993`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/bf77993be0d13773e2aad97c6109410bf4a952c7))
+
 ## v0.7.2 (2024-03-15)
 ### Fix
 * **hooks:** Show exit code on file execution error ([`15fb3f6`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/15fb3f60b16cd0d2bb4cfd71e948e67dadbfb8a5))
