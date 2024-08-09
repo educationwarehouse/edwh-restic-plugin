@@ -4,16 +4,13 @@ import typing
 
 import invoke
 from edwh.tasks import DOCKER_COMPOSE
-from invoke import task
+from invoke import Context, task
 from print_color import print  # fixme: replace with termcolor
 
 from .env import DOTENV, read_dotenv, set_env_value
 from .helpers import _require_restic
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
-
-if typing.TYPE_CHECKING:
-    from invoke import Context  # noqa: F401 - unused is ok for type checking
 
 
 def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repository:
@@ -161,18 +158,29 @@ def snapshots(c, connection_choice: str = None, tag: list[str] = None, n: int = 
     cli_repo(connection_choice).snapshot(c, tags=tag, n=n, verbose=verbose)
 
 
+def interactive(c: Context):
+    while (command := input("> ")) != "exit":
+        print(c.run(command, hide=True, warn=True, pty=True))
+
+
 @task(pre=[require_restic])
-def run(c, connection_choice: str = None):
+def run(c, connection_choice: str = None, command: typing.Optional[str] = None):
     """
     This function prepares for restic and runs the input command until the user types "exit".
 
     :type c: Context
     :param connection_choice: The connection name of the repository.
+    :param command: restic subcommand to use (default: none, prompt interactively)
     """
 
     cli_repo(connection_choice).prepare_for_restic(c)
-    while (command := input("> ")) != "exit":
+
+    if command:
+        if not command.startswith("restic "):
+            command = f"restic {command}"
         print(c.run(command, hide=True, warn=True, pty=True))
+    else:
+        interactive(c)
 
 
 # TODO: needs to be tested
