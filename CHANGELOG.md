@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.8.0 (2024-08-20)
+
+### Feature
+
+* Added --command <restic subcommand> option to `restic run`, since you don't always want to enter commands interactively ([`92754fd`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/92754fdcc1411c63455893bbd555df894e211739))
+
 ## v0.7.3 (2024-04-12)
 
 ### Fix
