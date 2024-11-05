@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.9.1 (2024-11-05)
+
+### Fix
+
+* **r2:** Bucket name was hardcoded ([`aebbeae`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/aebbeae64047f75014bbb6c6ef01f001562ac188))
+
 ## v0.9.0 (2024-11-05)
 
 ### Feature
