@@ -22,7 +22,7 @@ class R2Repository(S3Repository):
             "R2_ACCOUNT_ID",
             default=None,
             comment="The ID of the account this bucket belongs to. "
-                    "Usually seen in the url: https://dash.cloudflare.com/your-id-goes-here/",
+            "Usually seen in the url: https://dash.cloudflare.com/your-id-goes-here/",
         )
 
         self.check_env(
@@ -45,8 +45,7 @@ class R2Repository(S3Repository):
     @property
     def uri(self) -> str:
         env = self.env_config
-        return "s3:91ae6bcdb5d8535ef6144860ea32fa09.r2.cloudflarestorage.com/restic-test".format(
-            namespace=env.get("ORACLE_NAMESPACE", "?"),
-            region=env.get("ORACLE_REGION", "?"),
-            bucket=env.get("ORACLE_NAME", "?"),
+        return "s3:{account_id}.r2.cloudflarestorage.com/{bucket}".format(
+            account_id=env.get("R2_ACCOUNT_ID", "?"),
+            bucket=env.get("R2_NAME", "?"),
         )
