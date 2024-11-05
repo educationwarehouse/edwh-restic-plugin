@@ -130,7 +130,7 @@ def check_env(
     with path.open(mode="r+") as env_file:
         env_file.seek(0, 2)
         # write key and value to .env file
-        env_file.write(f"\n{key.upper()}={value}\n")
+        env_file.write(f"\n{key.upper()}={value}")
 
     # update in memory too:
     os.environ[key] = env[key] = value
