@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.9.0 (2024-11-05)
+
+### Feature
+
+* Support Cloudflare R2 as a storage backend ([`7e8e328`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/7e8e328f48e06af5dc04570a3e17213cf6bbc459))
+
 ## v0.8.0 (2024-08-20)
 
 ### Feature
