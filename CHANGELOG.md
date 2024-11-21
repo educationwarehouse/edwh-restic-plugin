@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.9.2 (2024-11-21)
+
+### Fix
+
+* Make `restic.run` use an actual (bash) shell instead of singular inputs (without readline/history) ;use termcolor instead of print_color; ([`0ac7c70`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/0ac7c7048c53c96ebddb03744b23f62972c599ab))
+
 ## v0.9.1 (2024-11-05)
 
 ### Fix
