@@ -15,7 +15,7 @@ from pathlib import Path
 import invoke
 from invoke import Context
 from invoke.exceptions import AuthFailure
-from print_color import print  # fixme: replace with termcolor
+from termcolor import cprint
 from tqdm import tqdm
 from typing_extensions import NotRequired
 
@@ -292,9 +292,9 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         for filename, status_code in zip(files, file_codes):
             if status_code == 0:
-                print(filename, tag="success", tag_color="green")
+                cprint(f"[success] {filename}", color="green")
             else:
-                print(filename, tag=f"failure ({status_code})", tag_color="red")
+                cprint(f"[failure ({status_code})] {filename}", color="red")
 
         if worst_status_code := max(file_codes) > 0:
             exit(worst_status_code)

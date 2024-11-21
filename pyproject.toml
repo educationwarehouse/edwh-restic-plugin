@@ -24,11 +24,9 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    'invoke',
-    'tqdm',
-    'print-color', # fixme: replace with termcolor
-    'diceware',
     'edwh',
+    'tqdm',
+    'termcolor',
     'typing-extensions',
 ]
 

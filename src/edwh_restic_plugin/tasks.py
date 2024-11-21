@@ -1,11 +1,12 @@
 import json
 import os
+import subprocess
 import typing
 
 import invoke
 from edwh.tasks import DOCKER_COMPOSE
 from invoke import Context, task
-from print_color import print  # fixme: replace with termcolor
+from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
 from .helpers import _require_restic
@@ -158,9 +159,8 @@ def snapshots(c, connection_choice: str = None, tag: list[str] = None, n: int = 
     cli_repo(connection_choice).snapshot(c, tags=tag, n=n, verbose=verbose)
 
 
-def interactive(c: Context):
-    while (command := input("> ")) != "exit":
-        print(c.run(command, hide=True, warn=True, pty=True))
+def interactive(conn: Repository):
+    subprocess.run(["/bin/bash", "--norc", "--noprofile"], env=os.environ | {"PS1": f"{conn!r} $ "})
 
 
 @task(pre=[require_restic])
@@ -172,18 +172,17 @@ def run(c, connection_choice: str = None, command: typing.Optional[str] = None):
     :param connection_choice: The connection name of the repository.
     :param command: restic subcommand to use (default: none, prompt interactively)
     """
-
-    cli_repo(connection_choice).prepare_for_restic(c)
+    conn = cli_repo(connection_choice)
+    conn.prepare_for_restic(c)
 
     if command:
         if not command.startswith("restic "):
             command = f"restic {command}"
         print(c.run(command, hide=True, warn=True, pty=True))
     else:
-        interactive(c)
+        interactive(conn)
 
 
-# TODO: needs to be tested
 @task()
 def env(c, connection_choice: str = None):
     """
