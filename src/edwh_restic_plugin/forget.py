@@ -214,8 +214,9 @@ class ResticForgetPolicy:
         toml_path.write_text(tomlkit.dumps(data))
 
     @classmethod
-    def get_or_copy_policy(cls, subkey: str, toml_path: Optional[str | Path] = None,
-                           default_toml_path: Optional[str | Path] = None) -> Optional[Self]:
+    def get_or_copy_policy(
+        cls, subkey: str, toml_path: Optional[str | Path] = None, default_toml_path: Optional[str | Path] = None
+    ) -> Optional[Self]:
         """
         Retrieves a policy from the TOML file or copies it from the default TOML file if not present.
 
@@ -260,4 +261,3 @@ class ResticForgetPolicy:
             return policy
 
         return None
-

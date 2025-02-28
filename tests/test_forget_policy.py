@@ -9,16 +9,8 @@ from src.edwh_restic_plugin.forget import ResticForgetPolicy
 
 
 def test_from_string():
-    input_args = [
-        "--keep-last", "123",
-        "--keep-hourly", "123213",
-        "--no-purge"
-    ]
-    expected_output = {
-        'keep_last': 123,
-        'keep_hourly': 123213,
-        'purge': False
-    }
+    input_args = ["--keep-last", "123", "--keep-hourly", "123213", "--no-purge"]
+    expected_output = {"keep_last": 123, "keep_hourly": 123213, "purge": False}
 
     policy = ResticForgetPolicy.from_string(*input_args)
 
@@ -36,9 +28,9 @@ def test_from_string():
         "--keep-tag test",
     ]
     expected_output = {
-        'keep_last': 123,
-        'keep_hourly': 123213,
-        'purge': True,
+        "keep_last": 123,
+        "keep_hourly": 123213,
+        "purge": True,
         "keep_tag": ["test"],
     }
 
@@ -52,7 +44,7 @@ def test_from_string():
         )
 
     expected_output = {
-        'purge': True,
+        "purge": True,
         "keep_tag": [],
     }
 
@@ -64,14 +56,10 @@ def test_from_string():
             f"but got {type(actual_value).__name__}({actual_value})"
         )
 
+
 def test_to_string_round_trip():
     # Create a policy instance
-    original_policy = ResticForgetPolicy(
-        keep_last=5,
-        keep_hourly=10,
-        keep_tag=["test"],
-        purge=False
-    )
+    original_policy = ResticForgetPolicy(keep_last=5, keep_hourly=10, keep_tag=["test"], purge=False)
 
     # Convert to string
     policy_string = original_policy.to_string()
@@ -87,7 +75,6 @@ def test_to_string_round_trip():
             f"Expected {type(original_value).__name__}({original_value}) for attribute '{attr}', "
             f"but got {type(new_value).__name__}({new_value})"
         )
-
 
 
 def test_from_toml_file():
@@ -115,11 +102,7 @@ def test_from_toml_file():
         toml_path.write_text(toml_content)
 
         policy_s4 = ResticForgetPolicy.from_toml_file("s4", str(toml_path))
-        expected_output_s4 = {
-            'keep_last': 123,
-            'keep_hourly': 123213,
-            'purge': False
-        }
+        expected_output_s4 = {"keep_last": 123, "keep_hourly": 123213, "purge": False}
 
         for key, value in expected_output_s4.items():
             actual_value = getattr(policy_s4, key)
@@ -129,11 +112,7 @@ def test_from_toml_file():
             )
 
         policy_s3 = ResticForgetPolicy.from_toml_file("s3", str(toml_path))
-        expected_output_s3 = {
-            'keep_last': 4,
-            'keep_hourly': 3,
-            'purge': True
-        }
+        expected_output_s3 = {"keep_last": 4, "keep_hourly": 3, "purge": True}
 
         for key, value in expected_output_s3.items():
             actual_value = getattr(policy_s3, key)
@@ -148,22 +127,14 @@ def test_to_toml():
         toml_path = Path(tempdir) / "scratch_14.toml"
 
         # Create a policy instance
-        policy = ResticForgetPolicy(
-            keep_last=5,
-            keep_hourly=10,
-            purge=True
-        )
+        policy = ResticForgetPolicy(keep_last=5, keep_hourly=10, purge=True)
 
         # Write to the TOML file under subkey 's5'
         policy.to_toml(toml_path, "s5")
 
         # Verify by reading back the data
         written_policy = ResticForgetPolicy.from_toml_file("s5", toml_path)
-        expected_output = {
-            'keep_last': 5,
-            'keep_hourly': 10,
-            'purge': True
-        }
+        expected_output = {"keep_last": 5, "keep_hourly": 10, "purge": True}
 
         for key, value in expected_output.items():
             actual_value = getattr(written_policy, key)
@@ -200,11 +171,7 @@ def test_get_or_copy_policy():
 
         # Verify that the data was copied to .toml under the correct subkey using from_toml_file
         loaded_policy = ResticForgetPolicy.from_toml_file("s6", toml_path)
-        expected_section = {
-            'keep_last': 7,
-            'keep_hourly': 8,
-            'purge': True
-        }
+        expected_section = {"keep_last": 7, "keep_hourly": 8, "purge": True}
 
         for key, value in expected_section.items():
             actual_value = getattr(loaded_policy, key)
@@ -233,9 +200,11 @@ def test_get_or_copy_policy():
 
 def test_invalid_from_string():
     invalid_args = [
-        "--keep-last", "abc",  # Invalid integer
-        "--keep-hourly", "123213",
-        "--no-purge"
+        "--keep-last",
+        "abc",  # Invalid integer
+        "--keep-hourly",
+        "123213",
+        "--no-purge",
     ]
     with pytest.raises(ValueError):
         ResticForgetPolicy.from_string(*invalid_args)
