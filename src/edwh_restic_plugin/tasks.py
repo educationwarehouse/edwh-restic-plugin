@@ -203,7 +203,43 @@ def env(c, connection_choice: str = None):
 
 @task()
 def forget(c: Context, connection: str = None, policy: str = None, dry: bool = False):
-    # https://restic.readthedocs.io/en/latest/060_forget.html#removing-snapshots-according-to-a-policy
+    """
+    Run restic forget (with prune) based on a specific policy defined in a TOML configuration file.
+
+    This task retrieves a forgetting policy based on the active connection's short name (e.g. 'os')
+    or its aliases (e.g. 'openstack', 'swift'), with a fallback to the key "default" if no specific policy is found.
+    The policy is first searched in the specified TOML configuration file
+    (defaulting to '.toml' in the current directory),
+    and if not present, it falls back to 'default.toml'.
+
+    The policy can include various retention options such as:
+        - `keep-last`: Number of latest snapshots to keep.
+        - `keep-hourly`: Number of hourly snapshots to keep.
+        - `keep-daily`: Number of daily snapshots to keep.
+        - `keep-weekly`: Number of weekly snapshots to keep.
+        - `keep-monthly`: Number of monthly snapshots to keep.
+        - `keep-yearly`: Number of yearly snapshots to keep.
+        ...
+
+    Example TOML section:
+        [tool.restic.openstack]
+        keep-daily = 3
+        keep-weekly = 2
+
+    Args:
+        c (Context): The context in which the task is executed.
+        connection (str, optional): The name of the connection to use for the backup.
+                                    Defaults to None which will look for the connection based on your .env file
+                                    and the repository priorities.
+        policy (str, optional): A string representation of the policy to apply.
+                                If not provided, the policy will be retrieved from the TOML files as described above.
+        dry (bool): If set to True, performs a dry run of the forget operation without making any changes.
+            This allows users to see what would happen without actually deleting any snapshots.
+
+    See also:
+        https://restic.readthedocs.io/en/latest/060_forget.html#removing-snapshots-according-to-a-policy
+    """
+
     repo = cli_repo(connection)
 
     repo.forget(
@@ -212,8 +248,31 @@ def forget(c: Context, connection: str = None, policy: str = None, dry: bool = F
         dry=dry,
     )
 
-@task()
-def du(c: Context, connection: str = None, mode: typing.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "restore-size"):
+
+@task(aliases=("stats", "stat"))
+def du(
+    c: Context,
+    connection: str = None,
+    mode: typing.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "raw-data",
+):
+    """
+    Retrieve and display statistics about the backup repository.
+
+    Args:
+        c: invoke Context
+        connection (str, optional): The name of the connection to use for the backup.
+                                    Defaults to None, which will look for the connection based on your .env file
+                                    and the repository priorities.
+
+        mode (Literal): Specifies the mode of statistics to retrieve.
+            Restic uses "restore-size" by default, but it's wildly inaccurate.
+            The available modes are:
+                - "restore-size": Estimates the size of data that would be restored.
+                - "file-by-contents": Shows the number of files and their sizes based on their contents.
+                - "blobs-per-file": Displays the number of blobs associated with each file.
+                - "raw-data": Provides the most detailed information about the repository's data.
+
+    """
     repo = cli_repo(connection)
     repo.prepare_env_for_restic(c)
 

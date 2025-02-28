@@ -416,6 +416,16 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         return None
 
     def forget(self, c: Context, policy: typing.Optional[ResticForgetPolicy] = None, dry: bool = False) -> None:
+        """
+        Prepare environment and execute restic forget command.
+
+        Args:
+            c (Context): The context in which the task is executed.
+            policy (Optional[ResticForgetPolicy]): An optional forgetting policy. If not provided, it will be determined
+                based on the active connection's name or aliases.
+            dry (bool): If set to True, performs a dry run of the forget operation without making any changes.
+                Defaults to False.
+        """
         self.prepare_env_for_restic(c)
 
         policy = policy or self._determine_forget_policy()
