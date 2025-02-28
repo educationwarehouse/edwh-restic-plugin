@@ -38,7 +38,7 @@ def test_priority(clear_prio):
     @register()
     class LowPrio1(DummyRepostiory): ...
 
-    @register(priority=1)
+    @register("high_prio", priority=1)
     class HighPrioRepository(DummyRepostiory): ...
 
     @register(priority=-1)
@@ -56,6 +56,8 @@ def test_priority(clear_prio):
         assert item == "high_prio"
         assert as_dict[item] == HighPrioRepository
         break
+
+    assert HighPrioRepository._short_name == "high_prio"
 
 
 def test_detection(clear_prio):

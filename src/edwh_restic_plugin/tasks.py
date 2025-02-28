@@ -9,6 +9,7 @@ from invoke import Context, task
 from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
+from .forget import ResticForgetPolicy
 from .helpers import _require_restic
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
@@ -201,8 +202,19 @@ def env(c, connection_choice: str = None):
 
 
 @task()
-def forget(c: Context, connection: str = None):
+def forget(c: Context, connection: str = None, policy: str = None, dry: bool = False):
     # https://restic.readthedocs.io/en/latest/060_forget.html#removing-snapshots-according-to-a-policy
     repo = cli_repo(connection)
 
-    print(repo.forget(c))
+    repo.forget(
+        c,
+        policy=policy and ResticForgetPolicy.from_string(policy),
+        dry=dry,
+    )
+
+@task()
+def du(c: Context, connection: str = None, mode: typing.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "restore-size"):
+    repo = cli_repo(connection)
+    repo.prepare_env_for_restic(c)
+
+    c.run(f"restic stats --mode {mode}")

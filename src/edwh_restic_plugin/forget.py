@@ -26,7 +26,7 @@ class ResticForgetPolicy:
         keep_within_weekly (Optional[str]): Weekly retention period within which to keep snapshots.
         keep_within_monthly (Optional[str]): Monthly retention period within which to keep snapshots.
         keep_within_yearly (Optional[str]): Yearly retention period within which to keep snapshots.
-        purge (bool): Whether to purge old snapshots. Default is True.
+        prune (bool): Whether to purge old snapshots. Default is True.
     """
 
     keep_last: Optional[int] = None
@@ -42,7 +42,8 @@ class ResticForgetPolicy:
     keep_within_weekly: Optional[str] = None
     keep_within_monthly: Optional[str] = None
     keep_within_yearly: Optional[str] = None
-    purge: bool = True
+    prune: bool = False
+    dry_run: bool = False
 
     def to_string(self) -> str:
         """
@@ -63,8 +64,9 @@ class ResticForgetPolicy:
                     # Append --no-<attr> if the value is False
                     if value:
                         args.append(option)
-                    else:
-                        args.append(f"--no-{attr}")
+                    # ↓ this works for parsing it ourselves but not for actual restic:
+                    # else:
+                    #     args.append(f"--no-{attr}")
                 else:
                     args.append(f"{option} {shlex.quote(str(value))}")
         return " ".join(args)
@@ -133,7 +135,7 @@ class ResticForgetPolicy:
         return cls(**options)
 
     @classmethod
-    def from_toml_file(cls, subkey: str, toml_path: Optional[str | Path] = None) -> Optional[Self]:
+    def from_toml_file(cls, subkey: str = "default", toml_path: Optional[str | Path] = None) -> Optional[Self]:
         """
         Creates a policy instance from a TOML file.
 
@@ -164,10 +166,14 @@ class ResticForgetPolicy:
             return None
 
         policy_dict = {}
+        type_hints = get_type_hints(cls)
+
         for key, value in section.items():
             # Convert keys to snake_case
             snake_key = key.replace("-", "_")
-            if snake_key == "purge":
+            attr_type = type_hints.get(snake_key, str)
+
+            if attr_type is bool:
                 policy_dict[snake_key] = bool(value)
             else:
                 try:
@@ -178,7 +184,11 @@ class ResticForgetPolicy:
 
         return cls(**policy_dict)
 
-    def to_toml(self, toml_path: str | Path, subkey: str) -> None:
+    def to_toml(
+        self,
+        subkey: str,
+        toml_path: str | Path,
+    ) -> None:
         """
         Writes the policy to a TOML file under the specified subkey, replacing it if it exists.
 
@@ -250,14 +260,31 @@ class ResticForgetPolicy:
         policy = cls.from_toml_file(subkey, default_toml_path)
         if policy:
             # Copy the policy to the main TOML file
-            policy.to_toml(toml_path, subkey)
+            policy.to_toml(
+                subkey,
+                toml_path,
+            )
             return policy
 
         # Try to get the default policy from the default TOML file
         policy = cls.from_toml_file("default", default_toml_path)
         if policy:
             # Copy the default policy to the main TOML file under the subkey
-            policy.to_toml(toml_path, subkey)
+            policy.to_toml(
+                "default",
+                toml_path,
+            )
             return policy
 
         return None
+
+    # since dry and prune are mutually exclusive, create helper here:
+
+    @property
+    def dry(self) -> bool:
+        return self.dry_run
+
+    @dry.setter
+    def dry(self, value: bool) -> None:
+        self.dry_run = value
+        self.prune = not value
