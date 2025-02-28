@@ -398,6 +398,15 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         print(stdout)
 
+    def forget(self, c: Context):
+        self.prepare_env_for_restic(c)
+
+        return c.run(
+            "restic forget --prune --keep-daily 7 --keep-weekly 4 --keep-monthly 12 --keep-yearly 100",
+            hide=True,
+            warn=True,
+        )
+
     # noop gt, lt etc methods
 
     def __gt__(self, other):

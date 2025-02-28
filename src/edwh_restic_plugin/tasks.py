@@ -198,3 +198,12 @@ def env(c, connection_choice: str = None):
     for k, v in new.items():
         if k not in old or old[k] != v:
             print(f"export {k.upper()}={v}")
+
+@task()
+def forget(c: Context, connection: str = None):
+    # https://restic.readthedocs.io/en/latest/060_forget.html#removing-snapshots-according-to-a-policy
+    repo = cli_repo(connection)
+
+    print(
+        repo.forget(c)
+    )

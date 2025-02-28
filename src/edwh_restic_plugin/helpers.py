@@ -35,10 +35,12 @@ def _require_restic(c: invoke.Context = None) -> bool:
         # restic already exists, do nothing
         return False
 
-    if require_sudo(c):
-        # sudo available
-        print("Restic missing from this system! Installing now...", file=sys.stderr)
-        c.sudo("sudo apt install -y restic", hide=True)
-        c.sudo("restic self-update", hide=True)
-        print("Restic installed and updated!", file=sys.stderr)
-        return True
+    if not require_sudo(c):
+        return False
+
+    # sudo available
+    print("Restic missing from this system! Installing now...", file=sys.stderr)
+    c.sudo("apt install -y restic", hide=True)
+    c.sudo("restic self-update", hide=True)
+    print("Restic installed and updated!", file=sys.stderr)
+    return True
