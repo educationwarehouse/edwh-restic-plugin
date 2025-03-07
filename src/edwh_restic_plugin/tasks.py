@@ -67,7 +67,14 @@ def configure(c, connection_choice=None, restichostname=None):
 
 
 @task
-def backup(c, target: str = "", connection_choice: str = None, message: str = None, verbose: bool = True):
+def backup(
+    c,
+    target: str = "",
+    connection_choice: str = None,
+    message: str = None,
+    verbose: bool = True,
+    without_forget: bool = False,
+):
     """Performs a backup operation using restic on a local or remote/cloud file system.
 
     Args:
@@ -78,11 +85,13 @@ def backup(c, target: str = "", connection_choice: str = None, message: str = No
         message (str): A message to attach to the backup snapshot.
             Defaults to None, which means no message will be attached.
         verbose (bool): If True, outputs more information about the backup process. Defaults to False.
+        without_forget (bool): don't execute forget policy to purge old snapshots
 
     Raises:
         Exception: If an error occurs during the backup process.
-
     """
+    # --without-forget is nicer than --no-with-forget, inverse here to make it less confusing:
+    with_forget = not without_forget
     # After 'backup', a file path can be specified.In this script, a test file is chosen at './test/testbestand'.
     # It can be replaced with the desired path over which restic should perform a backup.
     # The option --verbose provides more information about the backup that is made.It can be removed if desired.
@@ -97,8 +106,12 @@ def backup(c, target: str = "", connection_choice: str = None, message: str = No
     # a file called 'foo' (optionally having a given header, no wildcards for the file name supported).
     # --exclude-larger-than 'size', Specified once to excludes files larger than the given size.
     # Please see 'restic help backup' for more specific information about each exclude option.
+    repo = cli_repo(connection_choice)
+    repo.backup(c, verbose, target, message)
 
-    cli_repo(connection_choice).backup(c, verbose, target, message)
+    # if policy is available: execute forget after backing up:
+    if with_forget and (policy := repo.determine_forget_policy()):
+        repo.forget(c, policy)
 
 
 @task

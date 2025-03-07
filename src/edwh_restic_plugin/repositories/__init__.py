@@ -404,7 +404,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         print(stdout)
 
-    def _determine_forget_policy(self) -> typing.Optional[ResticForgetPolicy]:
+    def determine_forget_policy(self) -> typing.Optional[ResticForgetPolicy]:
         for option in (
             self._short_name,
             *self._aliases,
@@ -428,7 +428,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         """
         self.prepare_env_for_restic(c)
 
-        policy = policy or self._determine_forget_policy()
+        policy = policy or self.determine_forget_policy()
 
         if not policy:
             return cprint("Error: no forget policy could be found. Update your .toml or specify --policy", color="red")
