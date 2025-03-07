@@ -2,6 +2,22 @@
 
 <!--next-version-placeholder-->
 
+## v0.10.0 (2025-03-07)
+
+### Feature
+
+* Started on `restic.forget` subcommand, doesn't use Policy class yet ([`dd91a08`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/dd91a08020b1b1360a9093e35b5d8585844ed27a))
+* Started on restic forget policy state class that can read/write cli args and toml files ([`929a941`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/929a941f1ac562042ee34b7c2f655a98a3d7f8b0))
+
+### Fix
+
+* **backup:** Execute forget policy after backing up (if available and --without-forget is not used) ([`fdec720`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/fdec72059e2bd659de5cc9f1d0637676fd62b853))
+* Rename 'purge' to 'prune' as restic expects that; add `du` helper for disk usage ([`96798e4`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/96798e4aeead7e53e1b1439cda46991f5c66f4e5))
+
+### Documentation
+
+* Add docstring to the new 'forget' and 'du' functions ([`1ffefd1`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/1ffefd17399e4e673e74ae1bfba68b34c276d367))
+
 ## v0.9.2 (2024-11-21)
 
 ### Fix
