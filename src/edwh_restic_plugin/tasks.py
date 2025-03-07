@@ -9,6 +9,7 @@ from invoke import Context, task
 from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
+from .forget import ResticForgetPolicy
 from .helpers import _require_restic
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
@@ -66,7 +67,14 @@ def configure(c, connection_choice=None, restichostname=None):
 
 
 @task
-def backup(c, target: str = "", connection_choice: str = None, message: str = None, verbose: bool = True):
+def backup(
+    c,
+    target: str = "",
+    connection_choice: str = None,
+    message: str = None,
+    verbose: bool = True,
+    without_forget: bool = False,
+):
     """Performs a backup operation using restic on a local or remote/cloud file system.
 
     Args:
@@ -77,11 +85,13 @@ def backup(c, target: str = "", connection_choice: str = None, message: str = No
         message (str): A message to attach to the backup snapshot.
             Defaults to None, which means no message will be attached.
         verbose (bool): If True, outputs more information about the backup process. Defaults to False.
+        without_forget (bool): don't execute forget policy to purge old snapshots
 
     Raises:
         Exception: If an error occurs during the backup process.
-
     """
+    # --without-forget is nicer than --no-with-forget, inverse here to make it less confusing:
+    with_forget = not without_forget
     # After 'backup', a file path can be specified.In this script, a test file is chosen at './test/testbestand'.
     # It can be replaced with the desired path over which restic should perform a backup.
     # The option --verbose provides more information about the backup that is made.It can be removed if desired.
@@ -96,8 +106,12 @@ def backup(c, target: str = "", connection_choice: str = None, message: str = No
     # a file called 'foo' (optionally having a given header, no wildcards for the file name supported).
     # --exclude-larger-than 'size', Specified once to excludes files larger than the given size.
     # Please see 'restic help backup' for more specific information about each exclude option.
+    repo = cli_repo(connection_choice)
+    repo.backup(c, verbose, target, message)
 
-    cli_repo(connection_choice).backup(c, verbose, target, message)
+    # if policy is available: execute forget after backing up:
+    if with_forget and (policy := repo.determine_forget_policy()):
+        repo.forget(c, policy)
 
 
 @task
@@ -198,3 +212,81 @@ def env(c, connection_choice: str = None):
     for k, v in new.items():
         if k not in old or old[k] != v:
             print(f"export {k.upper()}={v}")
+
+
+@task()
+def forget(c: Context, connection: str = None, policy: str = None, dry: bool = False):
+    """
+    Run restic forget (with prune) based on a specific policy defined in a TOML configuration file.
+
+    This task retrieves a forgetting policy based on the active connection's short name (e.g. 'os')
+    or its aliases (e.g. 'openstack', 'swift'), with a fallback to the key "default" if no specific policy is found.
+    The policy is first searched in the specified TOML configuration file
+    (defaulting to '.toml' in the current directory),
+    and if not present, it falls back to 'default.toml'.
+
+    The policy can include various retention options such as:
+        - `keep-last`: Number of latest snapshots to keep.
+        - `keep-hourly`: Number of hourly snapshots to keep.
+        - `keep-daily`: Number of daily snapshots to keep.
+        - `keep-weekly`: Number of weekly snapshots to keep.
+        - `keep-monthly`: Number of monthly snapshots to keep.
+        - `keep-yearly`: Number of yearly snapshots to keep.
+        ...
+
+    Example TOML section:
+        [tool.restic.openstack]
+        keep-daily = 3
+        keep-weekly = 2
+
+    Args:
+        c (Context): The context in which the task is executed.
+        connection (str, optional): The name of the connection to use for the backup.
+                                    Defaults to None which will look for the connection based on your .env file
+                                    and the repository priorities.
+        policy (str, optional): A string representation of the policy to apply.
+                                If not provided, the policy will be retrieved from the TOML files as described above.
+        dry (bool): If set to True, performs a dry run of the forget operation without making any changes.
+            This allows users to see what would happen without actually deleting any snapshots.
+
+    See also:
+        https://restic.readthedocs.io/en/latest/060_forget.html#removing-snapshots-according-to-a-policy
+    """
+
+    repo = cli_repo(connection)
+
+    repo.forget(
+        c,
+        policy=policy and ResticForgetPolicy.from_string(policy),
+        dry=dry,
+    )
+
+
+@task(aliases=("stats", "stat"))
+def du(
+    c: Context,
+    connection: str = None,
+    mode: typing.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "raw-data",
+):
+    """
+    Retrieve and display statistics about the backup repository.
+
+    Args:
+        c: invoke Context
+        connection (str, optional): The name of the connection to use for the backup.
+                                    Defaults to None, which will look for the connection based on your .env file
+                                    and the repository priorities.
+
+        mode (Literal): Specifies the mode of statistics to retrieve.
+            Restic uses "restore-size" by default, but it's wildly inaccurate.
+            The available modes are:
+                - "restore-size": Estimates the size of data that would be restored.
+                - "file-by-contents": Shows the number of files and their sizes based on their contents.
+                - "blobs-per-file": Displays the number of blobs associated with each file.
+                - "raw-data": Provides the most detailed information about the repository's data.
+
+    """
+    repo = cli_repo(connection)
+    repo.prepare_env_for_restic(c)
+
+    c.run(f"restic stats --mode {mode}")

@@ -20,6 +20,7 @@ from tqdm import tqdm
 from typing_extensions import NotRequired
 
 from ..env import DOTENV, check_env, read_dotenv
+from ..forget import ResticForgetPolicy
 from ..helpers import _require_restic, camel_to_snake, fix_tags
 
 # the path where the restic command is going to be executed
@@ -42,6 +43,11 @@ class SortableMeta(abc.ABCMeta):
 
 
 class Repository(abc.ABC, metaclass=SortableMeta):
+    # these are set via @register:
+    _short_name: str
+    _aliases: tuple[str, ...]
+    _priority: int
+
     ####################
     # IMPLEMENT THESE: #
     ####################
@@ -398,6 +404,45 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         print(stdout)
 
+    def determine_forget_policy(self) -> typing.Optional[ResticForgetPolicy]:
+        for option in (
+            self._short_name,
+            *self._aliases,
+            "default",
+        ):
+            if policy := ResticForgetPolicy.get_or_copy_policy(option):
+                return policy
+
+        return None
+
+    def forget(self, c: Context, policy: typing.Optional[ResticForgetPolicy] = None, dry: bool = False) -> None:
+        """
+        Prepare environment and execute restic forget command.
+
+        Args:
+            c (Context): The context in which the task is executed.
+            policy (Optional[ResticForgetPolicy]): An optional forgetting policy. If not provided, it will be determined
+                based on the active connection's name or aliases.
+            dry (bool): If set to True, performs a dry run of the forget operation without making any changes.
+                Defaults to False.
+        """
+        self.prepare_env_for_restic(c)
+
+        policy = policy or self.determine_forget_policy()
+
+        if not policy:
+            return cprint("Error: no forget policy could be found. Update your .toml or specify --policy", color="red")
+
+        policy.dry = dry
+
+        args = policy.to_string()
+
+        cprint(f"$ restic forget {args}", color="blue")
+        c.run(
+            f"restic forget {args}",
+            pty=True,
+        )
+
     # noop gt, lt etc methods
 
     def __gt__(self, other):
@@ -472,7 +517,7 @@ class RepositoryRegistrations:
 
 
 def register(
-    short_name: str = None,
+    short_name: typing.Optional[str] = None,
     aliases: tuple[str, ...] = (),
     priority: int = -1,
     # **settings: Unpack[RepositoryRegistration] # <- not really supported yet!
@@ -484,13 +529,18 @@ def register(
         if not (isinstance(cls, type) and issubclass(cls, Repository)):
             raise TypeError(f"Decorated class {cls} must be a subclass of Repository!")
 
+        name_or_derived = short_name or camel_to_snake(cls.__name__).removesuffix("_repository")
+
         settings: RepositoryRegistration = {
-            "short_name": short_name or camel_to_snake(cls.__name__).removesuffix("_repository"),
+            "short_name": name_or_derived,
             "aliases": aliases,
             "priority": priority,
         }
 
         registrations.push(cls, settings)
+        cls._short_name = name_or_derived
+        cls._aliases = aliases
+        cls._priority = priority
         return cls
 
     return wraps
