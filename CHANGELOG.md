@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.11.0 (2025-04-03)
+
+### Feature
+
+* Switch to openstack auth v3 ([`1fe480b`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/1fe480bd8add763046d2b54a6a5d75cf2e8a5f76))
+
 ## v0.10.0 (2025-03-07)
 
 ### Feature
