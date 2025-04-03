@@ -22,16 +22,16 @@ class SwiftRepository(Repository):
         """Ensure the required settings are defined in the .env file."""
         self.check_env(
             "OS_AUTH_URL",
-            default="https://identity.stack.cloudvps.com/v2.0",
+            default="https://auth.teamblue.cloud/v3",
             comment="Auth URL for this openstack environment",
         )
         self.check_env(
-            "OS_TENANT_ID",
+            "OS_PROJECT_ID",
             default=None,
-            comment='Tenant name, comes from the openrc file, or from the auth info, looks like "f8d15....269"',
+            comment='Project ID, comes from the openrc file, or from the auth info, looks like "f8d15....269"',
         )
         self.check_env(
-            "OS_TENANT_NAME",
+            "OS_PROJECT_NAME",
             default="BST000425 productie-backups",
             comment="Project name within openstack, for example 'BST000425 production backups'",
         )
@@ -66,32 +66,19 @@ class SwiftRepository(Repository):
             comment="Password of the repository within the container",
         )
 
-        # check_env(
-        #     DOTENV,
-        #     "OS_STORAGE_URL",
-        #     default=None,
-        #     comment="voer hier de juiste URL in.",
-        # )
-        # check_env(
-        #     DOTENV,
-        #     "OS_AUTH_TOKEN",
-        #     default=None,
-        #     comment="gvoer hier de juiste TOKEN in.",
-        # )
-
     def prepare_for_restic(self, _: Context):
         """read variables out of .env file"""
         env = self.env_config
 
         self.name = env["OS_NAME"]
         self.container_name = env["OS_CONTAINERNAME"]
+
         os.environ["OS_USERNAME"] = env["OS_USERNAME"]
         os.environ["OS_AUTH_URL"] = env["OS_AUTH_URL"]
-        os.environ["OS_TENANT_ID"] = env["OS_TENANT_ID"]
-        os.environ["OS_TENANT_NAME"] = env["OS_TENANT_NAME"]
+        os.environ["OS_PROJECT_ID"] = env["OS_PROJECT_ID"]
+        os.environ["OS_USER_DOMAIN_NAME"] = "default"
+        os.environ["OS_PROJECT_NAME"] = env["OS_PROJECT_NAME"]
         os.environ["OS_REGION_NAME"] = env["OS_REGION_NAME"]
-        # os.environ["OS_STORAGE_URL"] = self.keyid = env["OS_STORAGE_URL"]
-        # os.environ["OS_AUTH_TOKEN"] = self.key = env["OS_AUTH_TOKEN"]
         os.environ["OS_PASSWORD"] = self.password = env["OS_PASSWORD"]
         os.environ["RESTIC_PASSWORD"] = self.restic_password = env["OS_RESTIC_PASSWORD"]
         os.environ["RESTIC_REPOSITORY"] = self.uri
