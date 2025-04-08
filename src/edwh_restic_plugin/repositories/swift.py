@@ -36,6 +36,11 @@ class SwiftRepository(Repository):
             comment="Project name within openstack, for example 'BST000425 production backups'",
         )
         self.check_env(
+            "OS_PROJECT_DOMAIN_NAME",
+            default="transip",
+            comment="De domein naam van het project",
+        )
+        self.check_env(
             "OS_REGION_NAME",
             default="NL",
             comment="NL is supported, others are unknown.",
@@ -66,6 +71,7 @@ class SwiftRepository(Repository):
             comment="Password of the repository within the container",
         )
 
+
     def prepare_for_restic(self, _: Context):
         """read variables out of .env file"""
         env = self.env_config
@@ -76,7 +82,7 @@ class SwiftRepository(Repository):
         os.environ["OS_USERNAME"] = env["OS_USERNAME"]
         os.environ["OS_AUTH_URL"] = env["OS_AUTH_URL"]
         os.environ["OS_PROJECT_ID"] = env["OS_PROJECT_ID"]
-        os.environ["OS_USER_DOMAIN_NAME"] = "default"
+        os.environ["OS_USER_DOMAIN_NAME"] = env["OS_PROJECT_DOMAIN_NAME"]
         os.environ["OS_PROJECT_NAME"] = env["OS_PROJECT_NAME"]
         os.environ["OS_REGION_NAME"] = env["OS_REGION_NAME"]
         os.environ["OS_PASSWORD"] = self.password = env["OS_PASSWORD"]
