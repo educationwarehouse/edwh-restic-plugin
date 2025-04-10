@@ -38,7 +38,7 @@ class SwiftRepository(Repository):
         self.check_env(
             "OS_PROJECT_DOMAIN_NAME",
             default="transip",
-            comment="De domein naam van het project",
+            comment="The domain name of the project",
         )
         self.check_env(
             "OS_REGION_NAME",
