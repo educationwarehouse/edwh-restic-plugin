@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.11.1 (2025-04-10)
+
+### Fix
+
+* Use OS_PROJECT_DOMAIN_NAME dynamically ([`8e245aa`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/8e245aafc01069498205d8833b40e561a6b1f463))
+
 ## v0.11.0 (2025-04-03)
 
 ### Feature
