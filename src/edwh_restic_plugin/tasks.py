@@ -4,8 +4,9 @@ import subprocess
 import typing
 
 import invoke
+from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
-from invoke import Context, task
+from invoke import Context
 from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value

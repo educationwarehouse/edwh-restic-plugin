@@ -71,7 +71,6 @@ class SwiftRepository(Repository):
             comment="Password of the repository within the container",
         )
 
-
     def prepare_for_restic(self, _: Context):
         """read variables out of .env file"""
         env = self.env_config
