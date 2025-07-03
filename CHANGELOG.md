@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.11.2 (2025-07-03)
+
+### Fix
+
+* Use `edwh.task` instead of `invoke.task` ([`48c66d4`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/48c66d41807fd4d9b1de5e94a3cc047e23c8b2a7))
+
 ## v0.11.1 (2025-04-10)
 
 ### Fix
