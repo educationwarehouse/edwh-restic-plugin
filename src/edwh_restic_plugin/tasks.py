@@ -263,6 +263,24 @@ def forget(c: Context, connection: str = None, policy: str = None, dry: bool = F
     )
 
 
+@task()
+def unlock(c: Context, connection: str = None, remove_all: bool = False):
+    """
+    Run restic unlock.
+    """
+
+    repo = cli_repo(connection)
+
+    repo.prepare_env_for_restic(c)
+
+    args = ["restic", "unlock"]
+
+    if remove_all:
+        args.append("--remove-all")
+
+    c.run(" ".join(args))
+
+
 @task(aliases=("stats", "stat"))
 def du(
     c: Context,
