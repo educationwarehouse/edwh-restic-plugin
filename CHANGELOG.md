@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.13.0 (2025-09-12)
+
+### Feature
+
+* Support Hetzner s3-compatible ([`b804260`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/b80426032579d0a592f12aa875f2e52fe8a7aabd))
+
 ## v0.12.0 (2025-08-30)
 
 ### Feature
