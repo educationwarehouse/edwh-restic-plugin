@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.13.1 (2025-09-12)
+
+### Fix
+
+* Finally add `restic.list` as alias for `restic.snapshots` ([`10e37a0`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/10e37a0233fc1acbd5b4d0feeef49cf801ce11d3))
+
 ## v0.13.0 (2025-09-12)
 
 ### Feature
