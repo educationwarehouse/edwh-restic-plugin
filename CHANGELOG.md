@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.12.0 (2025-08-30)
+
+### Feature
+
+* Support `ew restic.unlock` ([`f2bcf74`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/f2bcf74fede0ada2e0bb4d1816dcf5bbbf80cc47))
+
 ## v0.11.2 (2025-07-03)
 
 ### Fix
