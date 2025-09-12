@@ -25,9 +25,9 @@ pip install edwh-restic-plugin
 But probably you want to install the whole `edwh` package:
 
 ```console
-pipx install edwh[plugins,omgeving]
+uvenv install edwh[plugins,omgeving]
 # or
-pipx install edwh[restic]
+uvenv install edwh[restic]
 ```
 
 ## What is Restic?
@@ -125,7 +125,7 @@ Possible arguments for `ew restic.backup`:
 ---
 ## Using `ew restic.restore`
 
-**example**: `ew restic.restore -v -c=local`
+**example**: `ew restic.restore -v -c local`
 
 Possible arguments for the `ew restic.restore`
 - **connection_choice**: connection to use for access to the repository. Can be OS, SFTP, B2, or 

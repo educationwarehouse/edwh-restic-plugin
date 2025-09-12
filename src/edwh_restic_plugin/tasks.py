@@ -7,7 +7,6 @@ import invoke
 from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
 from invoke import Context
-from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
 from .forget import ResticForgetPolicy
