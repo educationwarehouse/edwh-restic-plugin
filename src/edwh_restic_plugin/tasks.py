@@ -153,7 +153,7 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
     # print("`inv up` to restart the services.")
 
 
-@task(iterable=["tag"])
+@task(iterable=["tag"], aliases=["list"])
 def snapshots(c, connection_choice: str = None, tag: list[str] = None, n: int = 1, verbose: bool = False):
     """
     With this you can see per repo which repo is made when and where, \
