@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.13.3 (2026-03-27)
+
+### Fix
+
+* **ConnectionDetection:** Checking for _PASSWORD instead of _NAME ([`7c01ce5`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/7c01ce5aebf1a32230a01832990faca55d872bb5))
+
 ## v0.13.2 (2026-03-27)
 
 ### Fix
