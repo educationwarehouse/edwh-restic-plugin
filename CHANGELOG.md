@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.13.2 (2026-03-27)
+
+### Fix
+
+* **priority:** Prioriteiten aangepast van de connection types. ([`3f16f66`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/3f16f66ba908725b2fc75b0481a59b5984cea6ab))
+
 ## v0.13.1 (2025-09-12)
 
 ### Fix
