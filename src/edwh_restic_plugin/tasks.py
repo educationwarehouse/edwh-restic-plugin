@@ -32,7 +32,7 @@ def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repos
     if connection_choice is None:
         # search for the most important backup and use it as default
         for option in options:
-            if f"{option.upper()}_NAME" in env:
+            if f"{option.upper()}_PASSWORD" in env:
                 connection_lowercase = option.lower()
                 break
     else:
