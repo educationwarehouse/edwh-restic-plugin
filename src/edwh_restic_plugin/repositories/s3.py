@@ -6,7 +6,7 @@ from invoke import Context
 from . import Repository, register
 
 
-@register()
+@register("s3", priority=5)
 class S3Repository(Repository):
     # todo: currently tested on Oracle s3 compat and other non-Amazon S3 compatible services, so check with actual S3!
 

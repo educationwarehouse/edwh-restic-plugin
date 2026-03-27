@@ -7,7 +7,7 @@ from . import register
 from .s3 import S3Repository
 
 
-@register()
+@register("r2", priority=4)
 class R2Repository(S3Repository):
     # https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm
 

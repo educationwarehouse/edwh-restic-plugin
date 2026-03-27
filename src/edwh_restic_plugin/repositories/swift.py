@@ -8,7 +8,7 @@ from . import Repository, register
 @register(
     short_name="os",
     aliases=("swift", "openstack"),
-    priority=1,  # high prio
+    priority=2,  # high prio
 )
 class SwiftRepository(Repository):
     def __init__(self):
