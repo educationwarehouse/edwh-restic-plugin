@@ -6,7 +6,7 @@ from invoke import Context
 from . import Repository, register
 
 
-@register(priority=4)
+@register()
 class LocalRepository(Repository):
     def __init__(self):
         super().__init__()

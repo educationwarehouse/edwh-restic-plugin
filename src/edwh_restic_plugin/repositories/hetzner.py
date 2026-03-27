@@ -7,7 +7,7 @@ from . import register
 from .s3 import S3Repository
 
 
-@register()
+@register("hetzner", priority=1)
 class HetznerRepository(S3Repository):
     def setup(self) -> None:
         self.check_env(

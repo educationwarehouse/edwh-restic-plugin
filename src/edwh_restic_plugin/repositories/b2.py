@@ -5,7 +5,7 @@ from invoke import Context
 from . import Repository, register
 
 
-@register(priority=2)
+@register(priority=3)
 class B2Repository(Repository):
     def __init__(self):
         super().__init__()

@@ -3,7 +3,7 @@ import os
 from . import Repository, register
 
 
-@register("sftp", priority=3)
+@register("sftp", priority=10)
 class SFTPRepository(Repository):
     def __init__(self):
         super().__init__()
