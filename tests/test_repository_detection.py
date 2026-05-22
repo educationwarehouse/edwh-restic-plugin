@@ -65,4 +65,4 @@ def test_detection(clear_prio):
 
     assert len(regs) > 3
 
-    assert next(iter(regs.keys())) == "os"
+    assert next(iter(regs.keys())) == "hetzner"

@@ -2,6 +2,7 @@ import os
 
 from edwh.helpers import generate_password
 from invoke import Context
+from restic_reaper import LocalConfig, wipe_repository_sync
 
 from . import Repository, register
 
@@ -45,3 +46,10 @@ class LocalRepository(Repository):
         The function returns the value of the 'name' attribute, which represents the URI of the class instance.
         """
         return getattr(self, "name", None) or self.env_config.get("LOCAL_NAME")
+
+    def wipe(self, dry: bool = False):
+        config = LocalConfig(
+            root=self.env_config["LOCAL_NAME"],
+        )
+
+        return wipe_repository_sync(**config, dry=dry)

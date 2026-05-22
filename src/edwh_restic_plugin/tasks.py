@@ -308,3 +308,9 @@ def du(
     repo.prepare_env_for_restic(c)
 
     c.run(f"restic stats --mode {mode}")
+
+
+@task()
+def wipe(c, connection: str = None, verbose: bool = False):
+    repo = cli_repo(connection)
+    repo.wipe()
