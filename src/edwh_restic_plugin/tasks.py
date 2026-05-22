@@ -313,4 +313,11 @@ def du(
 @task()
 def wipe(c, connection: str = None, verbose: bool = False):
     repo = cli_repo(connection)
+    repo.prepare_env_for_restic(c)
+
+    confirmation = input(f"Type YES to wipe repository {repo!r}: ").strip()
+    if confirmation != "YES":
+        print("Aborted wipe operation.")
+        return
+
     repo.wipe()
