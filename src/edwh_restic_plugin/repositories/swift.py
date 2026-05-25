@@ -1,6 +1,7 @@
 import os
 
 from invoke import Context
+from restic_reaper import SwiftConfig, wipe_repository_sync
 
 from . import Repository, register
 
@@ -97,3 +98,19 @@ class SwiftRepository(Repository):
         :return: the swift uri with self.containername and self.name
         """
         return f"swift:{self.container_name}:/{self.name}"
+
+    def wipe(self, dry: bool = False):
+        env = self.env_config
+        config = SwiftConfig(
+            container=env["OS_CONTAINERNAME"],
+            auth_url=env["OS_AUTH_URL"],
+            project_id=env["OS_PROJECT_ID"],
+            project_name=env["OS_PROJECT_NAME"],
+            project_domain_name=env["OS_PROJECT_DOMAIN_NAME"],
+            region_name=env["OS_REGION_NAME"],
+            username=env["OS_USERNAME"],
+            password=env["OS_PASSWORD"],
+            root=env["OS_NAME"],
+        )
+
+        return wipe_repository_sync(**config, dry=dry)

@@ -2,6 +2,7 @@ import os
 
 from edwh.helpers import generate_password
 from invoke import Context
+from restic_reaper import S3Config, wipe_repository_sync
 
 from . import Repository, register
 
@@ -47,3 +48,14 @@ class S3Repository(Repository):
         # make sure prefix and suffix are there but only once:
         base = base.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
         return f"s3:{base}/{bucket}"
+
+    def wipe(self, dry: bool = False):
+        env = self.env_config
+        config = S3Config(
+            bucket=env["S3_NAME"],
+            endpoint=env["S3_URL"],
+            access_key_id=env["S3_ACCESS_KEY_ID"],
+            secret_access_key=env["S3_SECRET_ACCESS_KEY"],
+        )
+
+        return wipe_repository_sync(**config, dry=dry)

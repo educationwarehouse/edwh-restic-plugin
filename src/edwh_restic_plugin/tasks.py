@@ -308,3 +308,16 @@ def du(
     repo.prepare_env_for_restic(c)
 
     c.run(f"restic stats --mode {mode}")
+
+
+@task()
+def wipe(c, connection: str = None):
+    repo = cli_repo(connection)
+    repo.prepare_env_for_restic(c)
+
+    confirmation = input(f"Type YES to wipe repository {repo!r}: ").strip()
+    if confirmation != "YES":
+        print("Aborted wipe operation.")
+        return
+
+    print(repo.wipe())

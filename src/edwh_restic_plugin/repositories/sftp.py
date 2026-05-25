@@ -1,5 +1,7 @@
 import os
 
+from restic_reaper import SftpConfig, wipe_repository_sync
+
 from . import Repository, register
 
 
@@ -28,6 +30,16 @@ class SFTPRepository(Repository):
             default=None,
             comment="Use the correnct hostname (directory above the repo name)",
         )  #
+        self.check_env(
+            "SFTP_USERNAME",
+            default=None,
+            comment="Username for connecting to the SFTP server (for wipe operations; optional).",
+        )
+        self.check_env(
+            "SFTP_PRIVATE_KEY",
+            default=None,
+            comment="Path to the private key file used for SFTP authentication (for wipe operations; optional).",
+        )
 
     def prepare_for_restic(self, c):
         """read out of .env file"""
@@ -62,3 +74,14 @@ class SFTPRepository(Repository):
         :return: sftp uri with self.hostname and self.name
         """
         return f"sftp:{self.hostname}:{self.name}"
+
+    def wipe(self, dry: bool = False):
+        env = self.env_config
+        config = SftpConfig(
+            endpoint=env["SFTP_HOSTNAME"],
+            user=env["SFTP_USERNAME"],
+            key=env["SFTP_PRIVATE_KEY"],
+            root=env["SFTP_NAME"],
+        )
+
+        return wipe_repository_sync(**config, dry=dry)

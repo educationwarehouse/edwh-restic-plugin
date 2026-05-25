@@ -23,6 +23,9 @@ from ..env import DOTENV, check_env, read_dotenv
 from ..forget import ResticForgetPolicy
 from ..helpers import _require_restic, camel_to_snake, fix_tags
 
+if typing.TYPE_CHECKING:
+    from restic_reaper import WipeOutcome
+
 # the path where the restic command is going to be executed
 DEFAULT_BACKUP_FOLDER = Path("captain-hooks")
 
@@ -74,6 +77,10 @@ class Repository(abc.ABC, metaclass=SortableMeta):
     def uri(self) -> str:
         """Return the prefix required for restic to indicate the protocol, for example sftp:hostname:"""
         raise NotImplementedError("Prefix unknown in base class")
+
+    @abc.abstractmethod
+    def wipe(self, dry: bool = False) -> "WipeOutcome":
+        raise NotImplementedError("Implement provider-specific wipe logic")
 
     ###########################
     # END OF NOT IMPLEMENTED, #

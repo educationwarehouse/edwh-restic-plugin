@@ -25,6 +25,7 @@ classifiers = [
 ]
 dependencies = [
     'edwh',
+    'restic-reaper',
     'tqdm',
     'termcolor',
     'typing-extensions',
@@ -35,6 +36,7 @@ dev = [
     "hatch",
     # "python-semantic-release >= 8.0.0a5",
     "black",
+    "pytest",
 ]
 
 [project.entry-points."edwh.tasks"]
