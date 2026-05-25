@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.14.0 (2026-05-25)
+
+### Feature
+
+* Restic.wipe ([#6](https://github.com/educationwarehouse/edwh-restic-plugin/issues/6)) ([`fbdbc70`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/fbdbc7013ad5b3deaf26af210a43a579d9a789cc))
+
 ## v0.13.3 (2026-03-27)
 
 ### Fix
