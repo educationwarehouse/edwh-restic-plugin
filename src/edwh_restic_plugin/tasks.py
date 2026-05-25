@@ -311,7 +311,7 @@ def du(
 
 
 @task()
-def wipe(c, connection: str = None, verbose: bool = False):
+def wipe(c, connection: str = None):
     repo = cli_repo(connection)
     repo.prepare_env_for_restic(c)
 
@@ -320,4 +320,4 @@ def wipe(c, connection: str = None, verbose: bool = False):
         print("Aborted wipe operation.")
         return
 
-    repo.wipe()
+    print(repo.wipe())
