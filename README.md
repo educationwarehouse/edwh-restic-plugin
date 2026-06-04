@@ -294,7 +294,7 @@ Behavior:
 - The command asks for explicit confirmation:
   - `Type YES to wipe repository <...>:`
 - Any response other than `YES` aborts the operation.
-- Actual wipe logic is backend-specific (implemented per provider, using `restic-reaper`).
+- S3-style backends share the generic wipe helper; other providers still implement their own config.
 
 Use this only when you intentionally want to remove a repository's backup contents.
 

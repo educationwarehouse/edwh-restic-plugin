@@ -42,5 +42,9 @@ class HetznerRepository(S3Repository):
         return "s3:{region}.your-objectstorage.com/{bucket}".format(
             account_id=env.get("HETZNER_ACCOUNT_ID", "?"),
             region=env.get("HETZNER_REGION", "?"),
-            bucket=env.get("HETZNER_BUCKET", "?"),
+            bucket=self.bucket,
         )
+
+    @property
+    def bucket(self):
+        return self.env_config["HETZNER_BUCKET"]

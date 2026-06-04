@@ -49,5 +49,9 @@ class OracleRepository(S3Repository):
         return "s3:{namespace}.compat.objectstorage.{region}.oraclecloud.com/{bucket}".format(
             namespace=env.get("ORACLE_NAMESPACE", "?"),
             region=env.get("ORACLE_REGION", "?"),
-            bucket=env.get("ORACLE_NAME", "?"),
+            bucket=self.bucket,
         )
+
+    @property
+    def bucket(self):
+        return self.env_config["ORACLE_NAME"]

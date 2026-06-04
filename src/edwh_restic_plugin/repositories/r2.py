@@ -47,5 +47,9 @@ class R2Repository(S3Repository):
         env = self.env_config
         return "s3:{account_id}.r2.cloudflarestorage.com/{bucket}".format(
             account_id=env.get("R2_ACCOUNT_ID", "?"),
-            bucket=env.get("R2_NAME", "?"),
+            bucket=self.bucket,
         )
+
+    @property
+    def bucket(self):
+        return self.env_config["R2_NAME"]

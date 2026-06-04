@@ -10,7 +10,6 @@ from . import Repository, register
 @register("s3", priority=5)
 class S3Repository(Repository):
     # todo: currently tested on Oracle s3 compat and other non-Amazon S3 compatible services, so check with actual S3!
-
     def setup(self) -> None:
         self.check_env(
             "S3_NAME",
@@ -42,20 +41,28 @@ class S3Repository(Repository):
         os.environ["AWS_SECRET_ACCESS_KEY"] = env["S3_SECRET_ACCESS_KEY"]
 
     @property
+    def bucket(self):
+        return self.env_config["S3_NAME"]
+
+    @property
     def uri(self) -> str:
-        bucket = self.env_config["S3_NAME"]
+        bucket = self.bucket
         base = self.env_config["S3_URL"]
         # make sure prefix and suffix are there but only once:
         base = base.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
         return f"s3:{base}/{bucket}"
 
-    def wipe(self, dry: bool = False):
-        env = self.env_config
-        config = S3Config(
-            bucket=env["S3_NAME"],
-            endpoint=env["S3_URL"],
-            access_key_id=env["S3_ACCESS_KEY_ID"],
-            secret_access_key=env["S3_SECRET_ACCESS_KEY"],
+    def s3_wipe_config(self) -> S3Config:
+        bucket = self.bucket
+        endpoint = self.uri.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
+        return S3Config(
+            bucket=bucket,
+            endpoint=endpoint,
+            access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+            secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         )
 
+    def wipe(self, dry: bool = False):
+        # assumes 'prepare_for_restic' was ran
+        config = self.s3_wipe_config()
         return wipe_repository_sync(**config, dry=dry)
