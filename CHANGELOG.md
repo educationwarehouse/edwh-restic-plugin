@@ -2,6 +2,16 @@
 
 <!--next-version-placeholder-->
 
+## v0.14.1 (2026-06-04)
+
+### Fix
+
+* Properly cascade `wipe` config for S3-derivatives ([`0c9e9fa`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/0c9e9fadc427e26fe59752e0ccaa4ec8b0bde322))
+
+### Documentation
+
+* Modernized README ([`b67c978`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/b67c9789e30786586b735df082cd7032bbc95fab))
+
 ## v0.14.0 (2026-05-25)
 
 ### Feature
