@@ -5,6 +5,7 @@ import tempfile
 import typing
 from pathlib import Path
 
+import edwh.tasks
 import invoke
 from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
@@ -341,6 +342,7 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
 
     target_repo = cli_repo(target)
     target_repo.prepare_env_for_restic(c)
+
     with tempfile.TemporaryDirectory() as rclone:
         rclone_config = Path(rclone) / "rclone.config"
         rclone_config.write_text(f"""[{source}]
@@ -349,14 +351,12 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
 [{target}]
 {target_repo.prepare_rclone_config()}""")
 
-        if int(c.run("rclone lsf -R --files-only my-hetzner:test-bucket-restic-move | wc -l").stdout) > 0:
-            if input(
-                "There are files in the target bucket. Continuing might overwrite them. Continue? y/n"
-            ).lower not in ["yes", "y", "1"]:
+        if int(c.run(f"rclone lsf -R --files-only {target}:{target_repo.bucket} | wc -l").stdout) > 0:
+            if not edwh.tasks.confirm("There are files in the target bucket. Continuing might overwrite them. Continue? y/n", default=True):
                 return
         params: str = ""
         if dry:
             params += "--dry-run"
         c.run(
-            f"rclone sync {source}:test-bucket-restic-move {target}:test-bucket-restic-move {params} --config {rclone_config}"
+            f"rclone sync {source}:{source_repo.bucket} {target}:{target_repo.bucket} {params} --config {rclone_config}"
         )

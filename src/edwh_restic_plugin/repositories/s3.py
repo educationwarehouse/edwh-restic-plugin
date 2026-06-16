@@ -73,5 +73,4 @@ class S3Repository(Repository):
 provider = Other
 access_key_id = {env["AWS_ACCESS_KEY_ID"]}
 secret_access_key = {env["AWS_SECRET_ACCESS_KEY"]}
-region = hel1
-endpoint = hel1.your-objectstorage.com"""
+endpoint = {env["S3_URL"]}"""
