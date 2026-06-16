@@ -99,6 +99,10 @@ class SwiftRepository(Repository):
         """
         return f"swift:{self.container_name}:/{self.name}"
 
+    @property
+    def bucket(self):
+        return self.env_config["OS_NAME"]
+
     def wipe(self, dry: bool = False):
         env = self.env_config
         config = SwiftConfig(

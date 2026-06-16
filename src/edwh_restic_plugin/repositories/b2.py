@@ -67,6 +67,10 @@ class B2Repository(Repository):
         """
         return f"b2:{self.bucket_name}:{self.name}"
 
+    @property
+    def bucket(self):
+        return self.env_config["B2_NAME"]
+
     def prepare_rclone_config(self):
         env = self.env_config
         return f"""type = b2
