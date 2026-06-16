@@ -101,7 +101,7 @@ class SwiftRepository(Repository):
 
     @property
     def bucket(self):
-        return self.env_config["OS_NAME"]
+        return f"{self.env_config['OS_CONTAINERNAME']}/{self.env_config['OS_NAME']}"
 
     def wipe(self, dry: bool = False):
         env = self.env_config

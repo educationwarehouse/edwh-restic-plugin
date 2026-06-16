@@ -352,9 +352,13 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
 {target_repo.prepare_rclone_config()}""")
 
         rclone = f"rclone --config {rclone_config}"
-        if int(c.run(f"{rclone} lsf -R --files-only {target}:{target_repo.bucket} | wc -l").stdout) > 0:
+        check_target_files = c.run(
+            f"{rclone} lsf -R --files-only {target}:{target_repo.bucket} | wc -l", hide=True
+        ).stdout.strip()
+        if int(check_target_files) > 0:
             if not edwh.tasks.confirm(
-                "There are files in the target bucket. Continuing might overwrite them. Continue? y/n", default=True
+                f"There are {check_target_files} files in the target bucket. Continuing might overwrite them. Continue? [Yn] ",
+                default=True,
             ):
                 return
         params: str = ""

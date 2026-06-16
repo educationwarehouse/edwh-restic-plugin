@@ -52,6 +52,7 @@ class S3Repository(Repository):
         base = base.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
         return f"s3:{base}/{bucket}"
 
+    # TODO add region for wipe
     def s3_wipe_config(self) -> S3Config:
         bucket = self.bucket
         endpoint = self.uri.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
@@ -69,8 +70,9 @@ class S3Repository(Repository):
 
     def prepare_rclone_config(self):
         env = self.env_config
+        # TODO replace S3 specific keys
         return f"""type = s3
 provider = Other
-access_key_id = {env["AWS_ACCESS_KEY_ID"]}
-secret_access_key = {env["AWS_SECRET_ACCESS_KEY"]}
+access_key_id = {env["S3_ACCESS_KEY_ID"]}
+secret_access_key = {env["S3_SECRET_ACCESS_KEY"]}
 endpoint = {env["S3_URL"]}"""
