@@ -326,7 +326,7 @@ def wipe(c, connection: str = None):
 
 
 @task()
-def move(c: Context, source: str, target: str, dry: bool = False):
+def move(c: Context, source: str = "", target: str = "", dry: bool = False):
     """Moves everything from source bucket to target bucket
     Args:
         c: Context
@@ -335,6 +335,7 @@ def move(c: Context, source: str, target: str, dry: bool = False):
         dry: set to True to do a dry run of move. This mimics the function without actually moving files.
              NOTE, It's recommended to do a dry run first since dataloss is possible.
     """
+    print(source, target)
     source_repo = cli_repo(source)
     source_repo.prepare_env_for_restic(c)
 
@@ -347,6 +348,12 @@ def move(c: Context, source: str, target: str, dry: bool = False):
 
 [{target}]
 {target_repo.prepare_rclone_config()}""")
+
+        if int(c.run("rclone lsf -R --files-only my-hetzner:test-bucket-restic-move | wc -l").stdout) > 0:
+            if input(
+                "There are files in the target bucket. Continuing might overwrite them. Continue? y/n"
+            ).lower not in ["yes", "y", "1"]:
+                return
         params: str = ""
         if dry:
             params += "--dry-run"
