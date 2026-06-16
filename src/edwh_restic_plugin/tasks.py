@@ -353,11 +353,11 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
 
         rclone = f"rclone --config {rclone_config}"
         if int(c.run(f"{rclone} lsf -R --files-only {target}:{target_repo.bucket} | wc -l").stdout) > 0:
-            if not edwh.tasks.confirm("There are files in the target bucket. Continuing might overwrite them. Continue? y/n", default=True):
+            if not edwh.tasks.confirm(
+                "There are files in the target bucket. Continuing might overwrite them. Continue? y/n", default=True
+            ):
                 return
         params: str = ""
         if dry:
             params += "--dry-run"
-        c.run(
-            f"{rclone} sync {source}:{source_repo.bucket} {target}:{target_repo.bucket} {params}"
-        )
+        c.run(f"{rclone} sync {source}:{source_repo.bucket} {target}:{target_repo.bucket} {params}")
