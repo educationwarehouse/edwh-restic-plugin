@@ -48,3 +48,12 @@ class HetznerRepository(S3Repository):
     @property
     def bucket(self):
         return self.env_config["HETZNER_BUCKET"]
+
+    def prepare_rclone_config(self):
+        env = self.env_config
+        return f"""type = s3
+    provider = Other
+    access_key_id = {env["HETZNER_ACCESS_KEY_ID"]}
+    secret_access_key = {env["HETZNER_SECRET_ACCESS_KEY"]}
+    region = {env["HETZNER_REGION"]}
+    endpoint = {env["HETZNER_REGION"]}.your-objectstorage.com"""

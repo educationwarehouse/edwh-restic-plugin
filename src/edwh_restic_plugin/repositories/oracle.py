@@ -55,3 +55,12 @@ class OracleRepository(S3Repository):
     @property
     def bucket(self):
         return self.env_config["ORACLE_NAME"]
+
+    def prepare_rclone_config(self):
+        env = self.env_config
+        return f"""type = s3
+    provider = Other
+    access_key_id = {env["ORACLE_ACCESS_KEY_ID"]}
+    secret_access_key = {env["ORACLE_SECRET_ACCESS_KEY"]}
+    region = {env["ORACLE_REGION"]}
+    endpoint = {env["ORACLE_NAMESPACE"]}.compat.objectstorage.{env["ORACLE_REGION"]}.oraclecloud.com"""

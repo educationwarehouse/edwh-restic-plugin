@@ -29,6 +29,7 @@ dependencies = [
     'tqdm',
     'termcolor',
     'typing-extensions',
+    "pathlib>=1.0.1",
 ]
 
 [project.optional-dependencies]

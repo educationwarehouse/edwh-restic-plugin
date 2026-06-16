@@ -66,3 +66,12 @@ class S3Repository(Repository):
         # assumes 'prepare_for_restic' was ran
         config = self.s3_wipe_config()
         return wipe_repository_sync(**config, dry=dry)
+
+    def prepare_rclone_config(self):
+        env = self.env_config
+        return f"""type = s3
+provider = Other
+access_key_id = {env["HETZNER_ACCESS_KEY_ID"]}
+secret_access_key = {env["HETZNER_SECRET_ACCESS_KEY"]}
+region = {env["HETZNER_REGION"]}
+endpoint = hel1.your-objectstorage.com"""

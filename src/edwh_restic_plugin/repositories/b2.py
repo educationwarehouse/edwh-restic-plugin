@@ -66,3 +66,9 @@ class B2Repository(Repository):
         :return: uri of b2 with self.bucketname and self.name
         """
         return f"b2:{self.bucket_name}:{self.name}"
+
+    def prepare_rclone_config(self):
+        env = self.env_config
+        return f"""type = b2
+    account = {env["B2_ACCOUNT_ID"]}
+    key = {env["B2_ACCOUNT_KEY"]}"""
