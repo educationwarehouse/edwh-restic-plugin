@@ -71,7 +71,7 @@ class S3Repository(Repository):
         env = self.env_config
         return f"""type = s3
 provider = Other
-access_key_id = {env["HETZNER_ACCESS_KEY_ID"]}
-secret_access_key = {env["HETZNER_SECRET_ACCESS_KEY"]}
-region = {env["HETZNER_REGION"]}
+access_key_id = {env["AWS_ACCESS_KEY_ID"]}
+secret_access_key = {env["AWS_SECRET_ACCESS_KEY"]}
+region = hel1
 endpoint = hel1.your-objectstorage.com"""
