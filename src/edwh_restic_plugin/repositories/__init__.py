@@ -82,6 +82,15 @@ class Repository(abc.ABC, metaclass=SortableMeta):
     def wipe(self, dry: bool = False) -> "WipeOutcome":
         raise NotImplementedError("Implement provider-specific wipe logic")
 
+    @property
+    @abc.abstractmethod
+    def bucket(self):
+        return NotImplementedError("Implement bucket name from env to return")
+
+    @abc.abstractmethod
+    def prepare_rclone_config(self) -> str:
+        raise NotImplementedError("Implement provider-specific rclone config logic")
+
     ###########################
     # END OF NOT IMPLEMENTED, #
     #    START BASE CLASS:    #

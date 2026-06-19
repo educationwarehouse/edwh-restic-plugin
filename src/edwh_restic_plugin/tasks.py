@@ -1,8 +1,11 @@
 import json
 import os
 import subprocess
+import tempfile
 import typing
+from pathlib import Path
 
+import edwh.tasks
 import invoke
 from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
@@ -321,3 +324,44 @@ def wipe(c, connection: str = None):
         return
 
     print(repo.wipe())
+
+
+@task()
+def move(c: Context, source: str = "", target: str = "", dry: bool = False):
+    """Moves everything from source bucket to target bucket
+    Args:
+        c: Context
+        source: source bucket
+        target: target bucket
+        dry: set to True to do a dry run of move. This mimics the function without actually moving files.
+             NOTE, It's recommended to do a dry run first since dataloss is possible.
+    """
+    print(source, target)
+    source_repo = cli_repo(source)
+    source_repo.prepare_env_for_restic(c)
+
+    target_repo = cli_repo(target)
+    target_repo.prepare_env_for_restic(c)
+
+    with tempfile.TemporaryDirectory() as rclone:
+        rclone_config = Path(rclone) / "rclone.config"
+        rclone_config.write_text(f"""[{source}]
+{source_repo.prepare_rclone_config()}
+
+[{target}]
+{target_repo.prepare_rclone_config()}""")
+
+        rclone = f"rclone --config {rclone_config}"
+        check_target_files = c.run(
+            f"{rclone} lsf -R --files-only {target}:{target_repo.bucket} | wc -l", hide=True
+        ).stdout.strip()
+        if int(check_target_files) > 0:
+            if not edwh.tasks.confirm(
+                f"There are {check_target_files} files in the target bucket. Continuing might overwrite them. Continue? [Yn] ",
+                default=True,
+            ):
+                return
+        params: str = ""
+        if dry:
+            params += "--dry-run"
+        c.run(f"{rclone} sync {source}:{source_repo.bucket} {target}:{target_repo.bucket} {params}")

@@ -66,3 +66,16 @@ class B2Repository(Repository):
         :return: uri of b2 with self.bucketname and self.name
         """
         return f"b2:{self.bucket_name}:{self.name}"
+
+    def wipe(self, dry: bool = False):
+        raise NotImplementedError("Wipe has not yet been implemented for b2")
+
+    @property
+    def bucket(self):
+        return f"{self.env_config['B2_BUCKETNAME']}/{self.env_config['B2_NAME']}"
+
+    def prepare_rclone_config(self):
+        env = self.env_config
+        return f"""type = b2
+    account = {env["B2_ACCOUNT_ID"]}
+    key = {env["B2_ACCOUNT_KEY"]}"""
