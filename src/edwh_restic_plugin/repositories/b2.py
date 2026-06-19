@@ -3,6 +3,7 @@ import os
 from invoke import Context
 
 from . import Repository, register
+from restic_reaper import S3Config, wipe_repository_sync
 
 
 @register(priority=3)
@@ -67,9 +68,12 @@ class B2Repository(Repository):
         """
         return f"b2:{self.bucket_name}:{self.name}"
 
+    def wipe(self, dry: bool = False):
+        raise NotImplementedError("Wipe has not yet been implemented for b2")
+
     @property
     def bucket(self):
-        return self.env_config["B2_NAME"]
+        return f"{self.env_config["B2_BUCKETNAME"]}/{self.env_config["B2_NAME"]}"
 
     def prepare_rclone_config(self):
         env = self.env_config

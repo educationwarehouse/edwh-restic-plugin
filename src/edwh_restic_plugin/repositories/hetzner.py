@@ -5,6 +5,7 @@ from invoke import Context
 
 from . import register
 from .s3 import S3Repository
+from restic_reaper import S3Config, wipe_repository_sync
 
 
 @register("hetzner", priority=1)

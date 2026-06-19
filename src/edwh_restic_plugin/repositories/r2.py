@@ -5,6 +5,7 @@ from invoke import Context
 
 from . import register
 from .s3 import S3Repository
+from restic_reaper import S3Config, wipe_repository_sync
 
 
 @register("r2", priority=4)
@@ -61,4 +62,4 @@ class R2Repository(S3Repository):
     access_key_id = {env["R2_ACCESS_KEY_ID"]}
     secret_access_key = {env["R2_SECRET_ACCESS_KEY"]}
     region = auto
-    endpoint = {env["R2_ACCOUNT_ID"]}.r2.cloudflarestorage.com/{self.bucket}"""
+    endpoint = {env["R2_ACCOUNT_ID"]}.r2.cloudflarestorage.com"""

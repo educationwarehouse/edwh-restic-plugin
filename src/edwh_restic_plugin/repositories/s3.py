@@ -31,6 +31,9 @@ class S3Repository(Repository):
         self.check_env(
             "S3_SECRET_ACCESS_KEY", default=None, comment="Specifies the secret key associated with the access key."
         )
+        self.check_env(
+            "S3_REGION", default="auto", comment="Specifies the buckets region."
+        )
 
     def prepare_for_restic(self, _: Context) -> None:
         env = self.env_config
@@ -59,6 +62,7 @@ class S3Repository(Repository):
         return S3Config(
             bucket=bucket,
             endpoint=endpoint,
+            region=self.env_config["S3_REGION"],
             access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
             secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         )
@@ -76,3 +80,28 @@ provider = Other
 access_key_id = {env["S3_ACCESS_KEY_ID"]}
 secret_access_key = {env["S3_SECRET_ACCESS_KEY"]}
 endpoint = {env["S3_URL"]}"""
+
+
+"""
+ValueError: opendal Unexpected: Unexpected (permanent) at list, 
+context: { uri: https://s3.de.io.cloud.ovh.net/test-restic-move-bucket?list-type=2, 
+    response: Parts 
+    { 
+        status: 400, 
+        version: HTTP/1.1, 
+        headers: 
+        {"content-type": "application/xml", 
+        "x-amz-id-2": "tx0b0002fc749d4385acce8-006a350c03", 
+        "x-amz-request-id": "tx0b0002fc749d4385acce8-006a350c03", 
+        "date": "Fri, 19 Jun 2026 09:29:39 GMT", 
+        "transfer-encoding": "chunked"
+    } 
+}, 
+service: s3, path: /, listed: 0 } => S3Error 
+{ 
+    code: "AuthorizationHeaderMalformed", 
+    message: "The authorization header is malformed; the region 'auto' is wrong; expecting 'de'", 
+    resource: "", 
+    request_id: "tx0b0002fc749d4385acce8-006a350c03" 
+}
+"""
