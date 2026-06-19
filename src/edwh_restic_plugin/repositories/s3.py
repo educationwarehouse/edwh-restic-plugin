@@ -31,9 +31,7 @@ class S3Repository(Repository):
         self.check_env(
             "S3_SECRET_ACCESS_KEY", default=None, comment="Specifies the secret key associated with the access key."
         )
-        self.check_env(
-            "S3_REGION", default="auto", comment="Specifies the buckets region."
-        )
+        self.check_env("S3_REGION", default="auto", comment="Specifies the buckets region.")
 
     def prepare_for_restic(self, _: Context) -> None:
         env = self.env_config
