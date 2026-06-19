@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.15.0 (2026-06-19)
+
+### Feature
+
+* **move:** Made move command. ([#7](https://github.com/educationwarehouse/edwh-restic-plugin/issues/7)) ([`dc20c67`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/dc20c6749cf1cb0752b07cf21876c134c074e0e7))
+
 ## v0.14.1 (2026-06-04)
 
 ### Fix
