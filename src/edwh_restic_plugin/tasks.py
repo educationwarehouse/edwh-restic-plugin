@@ -6,10 +6,10 @@ import typing
 from pathlib import Path
 
 import edwh.tasks
-import invoke
+import ewok
 from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
-from invoke import Context
+from ewok import Context
 
 from .env import DOTENV, read_dotenv, set_env_value
 from .forget import ResticForgetPolicy
@@ -218,7 +218,7 @@ def env(c, connection_choice: str = None):
 
 
 @task()
-def forget(c: Context, connection: str = None, policy: str = None, dry: bool = False):
+def forget(c: ewok.Context, connection: str = None, policy: str = None, dry: bool = False):
     """
     Run restic forget (with prune) based on a specific policy defined in a TOML configuration file.
 
@@ -266,7 +266,7 @@ def forget(c: Context, connection: str = None, policy: str = None, dry: bool = F
 
 
 @task()
-def unlock(c: Context, connection: str = None, remove_all: bool = False):
+def unlock(c: ewok.Context, connection: str = None, remove_all: bool = False):
     """
     Run restic unlock.
     """
@@ -285,7 +285,7 @@ def unlock(c: Context, connection: str = None, remove_all: bool = False):
 
 @task(aliases=("stats", "stat"))
 def du(
-    c: Context,
+    c: ewok.Context,
     connection: str = None,
     mode: typing.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "raw-data",
 ):
@@ -293,7 +293,7 @@ def du(
     Retrieve and display statistics about the backup repository.
 
     Args:
-        c: invoke Context
+        c: ewok Context
         connection (str, optional): The name of the connection to use for the backup.
                                     Defaults to None, which will look for the connection based on your .env file
                                     and the repository priorities.
@@ -327,7 +327,7 @@ def wipe(c, connection: str = None):
 
 
 @task()
-def move(c: Context, source: str = "", target: str = "", dry: bool = False):
+def move(c: ewok.Context, source: str = "", target: str = "", dry: bool = False):
     """Moves everything from source bucket to target bucket
     Args:
         c: Context
@@ -368,7 +368,7 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
 
 
 @task(pre=[edwh.tasks.require_sudo])
-def get_env(c):
+def get_env(c: ewok.Context):
     options = registrations.to_ordered_dict()
     grep_options = ""
     for option in options:
@@ -379,9 +379,9 @@ def get_env(c):
         .stdout.strip()
         .split("\n")
     )
-    for i  in env_files:
-        if not home + "/.env" in i and home + "/." in i:
+    for env_file in env_files:
+        if not home + "/.env" in env_file and home + "/." in env_file:
             continue
-        print(f"\n{i}\n")
-        c.sudo(f"cat {i}")
+        print(f"\n{env_file}\n")
+        c.sudo(f"cat {env_file}")
     print("\n")
