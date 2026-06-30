@@ -365,3 +365,23 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
         if dry:
             params += "--dry-run"
         c.run(f"{rclone} sync {source}:{source_repo.bucket} {target}:{target_repo.bucket} {params}")
+
+
+@task(pre=[edwh.tasks.require_sudo])
+def get_env(c):
+    options = registrations.to_ordered_dict()
+    grep_options = ""
+    for option in options:
+        grep_options += f"-e '{option.upper()}_' "
+    home = c.run("echo $HOME", hide=True).stdout.strip()
+    env_files = (
+        c.run(f"find {home} -name .env -type f -exec grep -l " + grep_options + " {}  \\;", hide=True)
+        .stdout.strip()
+        .split("\n")
+    )
+    for i  in env_files:
+        if not home + "/.env" in i and home + "/." in i:
+            continue
+        print(f"\n{i}\n")
+        c.sudo(f"cat {i}")
+    print("\n")
