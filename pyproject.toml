@@ -29,6 +29,7 @@ dependencies = [
     'tqdm',
     'termcolor',
     'typing-extensions',
+    "ewok>=0.4.8",
 ]
 
 [project.optional-dependencies]

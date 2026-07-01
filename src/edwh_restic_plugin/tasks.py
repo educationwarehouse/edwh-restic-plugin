@@ -6,10 +6,9 @@ import typing
 from pathlib import Path
 
 import edwh.tasks
-import invoke
 from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
-from invoke import Context
+from ewok import Context
 
 from .env import DOTENV, read_dotenv, set_env_value
 from .forget import ResticForgetPolicy
@@ -293,7 +292,7 @@ def du(
     Retrieve and display statistics about the backup repository.
 
     Args:
-        c: invoke Context
+        c: ewok Context
         connection (str, optional): The name of the connection to use for the backup.
                                     Defaults to None, which will look for the connection based on your .env file
                                     and the repository priorities.
@@ -365,3 +364,36 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
         if dry:
             params += "--dry-run"
         c.run(f"{rclone} sync {source}:{source_repo.bucket} {target}:{target_repo.bucket} {params}")
+
+
+@task(pre=[edwh.tasks.require_sudo])
+def backup_env_variables(c: Context, full: bool = False):
+    """prints out all .env repo variables
+
+
+    Args:
+        c: ewok Context
+        full: enable to display all .env variables instead of repo variables
+
+    Returns:
+    """
+    options = registrations.to_ordered_dict()
+    grep_options = ""
+    for option in options:
+        grep_options += f"-e '{option.upper()}_' "
+    home = c.run("echo $HOME", hide=True).stdout.strip()
+    env_files = (
+        c.run(f"find {home} -name .env -type f -exec grep -l " + grep_options + " {}  \\;", hide=True)
+        .stdout.strip()
+        .split("\n")
+    )
+    if not full:
+        grep_options = " | grep " + grep_options
+    else:
+        grep_options = ""
+    for env_file in env_files:
+        if not home + "/.env" in env_file and home + "/." in env_file:
+            continue
+        print(f"\n{env_file}\n")
+        c.sudo(f"cat {env_file}{grep_options}")
+    print("\n")
