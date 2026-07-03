@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.16.0 (2026-07-03)
+
+### Feature
+
+* Restic.backup-env-variables ([`57ecf69`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/57ecf69a1f522b29b908838886b95a01adfbb22a))
+
 ## v0.15.0 (2026-06-19)
 
 ### Feature
