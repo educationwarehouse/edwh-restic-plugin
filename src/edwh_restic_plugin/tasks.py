@@ -368,14 +368,13 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
 
 @task(pre=[edwh.tasks.require_sudo])
 def backup_env_variables(c: Context, full: bool = False):
-    """prints out all .env repo variables
+    """Prints out all .env repo variables
 
 
     Args:
         c: ewok Context
         full: enable to display all .env variables instead of repo variables
 
-    Returns:
     """
     options = registrations.to_ordered_dict()
     grep_options = ""
@@ -383,7 +382,7 @@ def backup_env_variables(c: Context, full: bool = False):
         grep_options += f"-e '{option.upper()}_' "
     home = c.run("echo $HOME", hide=True).stdout.strip()
     env_files = (
-        c.run(f"find {home} -name .env -type f -exec grep -l " + grep_options + " {}  \\;", hide=True)
+        c.run(f"sudo find {home} -name .env -type f -exec grep -l " + grep_options + " {}  \\;", hide=True)
         .stdout.strip()
         .split("\n")
     )
