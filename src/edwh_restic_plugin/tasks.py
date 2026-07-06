@@ -4,6 +4,7 @@ import subprocess
 import tempfile
 import typing
 from pathlib import Path
+from termcolor import cprint
 
 import edwh.tasks
 from edwh import task
@@ -396,3 +397,11 @@ def backup_env_variables(c: Context, full: bool = False):
         print(f"\n{env_file}\n")
         c.sudo(f"cat {env_file}{grep_options}")
     print("\n")
+
+@task()
+def check_abstract_methode(c : Context):
+    for repository_class in registrations:
+        try:
+            x = repository_class()
+        except TypeError as e:
+            cprint(f"Repository missing abstract methode(s): {repository_class.__name__} \n {e}", color="red")
