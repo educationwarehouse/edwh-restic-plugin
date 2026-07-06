@@ -47,6 +47,12 @@ class LocalRepository(Repository):
         """
         return getattr(self, "name", None) or self.env_config.get("LOCAL_NAME")
 
+    def bucket(self):
+        return self.env_config["LOCAL_NAME"]
+
+    def prepare_rclone_config(self):
+        ...
+
     def wipe(self, dry: bool = False):
         config = LocalConfig(
             root=self.env_config["LOCAL_NAME"],
