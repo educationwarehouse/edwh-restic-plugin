@@ -81,7 +81,6 @@ class SFTPRepository(Repository):
 
     def prepare_rclone_config(self):
         env = self.env_config
-        print(env["SFTP_HOSTNAME"], env["SFTP_USERNAME"])
         return f"""type = sftp
 host = {env["SFTP_HOSTNAME"]}
 user = {env["SFTP_USERNAME"]}
