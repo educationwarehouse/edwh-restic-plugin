@@ -75,12 +75,20 @@ class SFTPRepository(Repository):
         """
         return f"sftp:{self.hostname}:{self.name}"
 
+    @property
     def bucket(self):
         return self.env_config["SFTP_NAME"]
 
     def prepare_rclone_config(self):
-        ...
-    
+        env = self.env_config
+        print(env["SFTP_HOSTNAME"], env["SFTP_USERNAME"])
+        return f"""type = sftp
+host = {env["SFTP_HOSTNAME"]}
+user = {env["SFTP_USERNAME"]}
+key_user_agent = true
+shell_type = unix
+"""
+
     def wipe(self, dry: bool = False):
         env = self.env_config
         config = SftpConfig(
