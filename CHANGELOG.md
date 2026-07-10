@@ -2,6 +2,12 @@
 
 <!--next-version-placeholder-->
 
+## v0.16.1 (2026-07-10)
+
+### Fix
+
+* **repositories:** Generalize S3-compatible configuration ([`50e45ac`](https://github.com/educationwarehouse/edwh-restic-plugin/commit/50e45ac04a63f5cb06bc08c9533a76f4de094efc))
+
 ## v0.16.0 (2026-07-03)
 
 ### Feature
