@@ -9,7 +9,6 @@ from . import Repository, register
 
 @register("s3", priority=5)
 class S3Repository(Repository):
-    # todo: currently tested on Oracle s3 compat and other non-Amazon S3 compatible services, so check with actual S3!
     def setup(self) -> None:
         self.check_env(
             "S3_NAME",
@@ -40,6 +39,7 @@ class S3Repository(Repository):
 
         os.environ["AWS_ACCESS_KEY_ID"] = env["S3_ACCESS_KEY_ID"]
         os.environ["AWS_SECRET_ACCESS_KEY"] = env["S3_SECRET_ACCESS_KEY"]
+        os.environ["AWS_DEFAULT_REGION"] = env.get("S3_REGION", "auto")
 
     @property
     def bucket(self):
@@ -53,14 +53,13 @@ class S3Repository(Repository):
         base = base.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
         return f"s3:{base}/{bucket}"
 
-    # TODO add region for wipe
     def s3_wipe_config(self) -> S3Config:
         bucket = self.bucket
         endpoint = self.uri.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
         return S3Config(
             bucket=bucket,
             endpoint=endpoint,
-            region=self.env_config["S3_REGION"],
+            region=os.environ.get("AWS_DEFAULT_REGION", "auto"),
             access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
             secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
         )
@@ -71,35 +70,11 @@ class S3Repository(Repository):
         return wipe_repository_sync(**config, dry=dry)
 
     def prepare_rclone_config(self):
-        env = self.env_config
-        # TODO replace S3 specific keys
+        bucket = self.bucket
+        endpoint = self.uri.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
         return f"""type = s3
 provider = Other
-access_key_id = {env["S3_ACCESS_KEY_ID"]}
-secret_access_key = {env["S3_SECRET_ACCESS_KEY"]}
-endpoint = {env["S3_URL"]}"""
-
-
-"""
-ValueError: opendal Unexpected: Unexpected (permanent) at list, 
-context: { uri: https://s3.de.io.cloud.ovh.net/test-restic-move-bucket?list-type=2, 
-    response: Parts 
-    { 
-        status: 400, 
-        version: HTTP/1.1, 
-        headers: 
-        {"content-type": "application/xml", 
-        "x-amz-id-2": "tx0b0002fc749d4385acce8-006a350c03", 
-        "x-amz-request-id": "tx0b0002fc749d4385acce8-006a350c03", 
-        "date": "Fri, 19 Jun 2026 09:29:39 GMT", 
-        "transfer-encoding": "chunked"
-    } 
-}, 
-service: s3, path: /, listed: 0 } => S3Error 
-{ 
-    code: "AuthorizationHeaderMalformed", 
-    message: "The authorization header is malformed; the region 'auto' is wrong; expecting 'de'", 
-    resource: "", 
-    request_id: "tx0b0002fc749d4385acce8-006a350c03" 
-}
-"""
+access_key_id = {os.environ["AWS_ACCESS_KEY_ID"]}
+secret_access_key = {os.environ["AWS_SECRET_ACCESS_KEY"]}
+region = {os.environ.get("AWS_DEFAULT_REGION", "auto")}
+endpoint = {endpoint}"""

@@ -41,6 +41,7 @@ class R2Repository(S3Repository):
 
         os.environ["AWS_ACCESS_KEY_ID"] = env["R2_ACCESS_KEY_ID"]
         os.environ["AWS_SECRET_ACCESS_KEY"] = env["R2_SECRET_ACCESS_KEY"]
+        os.environ["AWS_DEFAULT_REGION"] = "auto"
 
     @property
     def uri(self) -> str:
@@ -53,12 +54,3 @@ class R2Repository(S3Repository):
     @property
     def bucket(self):
         return self.env_config["R2_NAME"]
-
-    def prepare_rclone_config(self):
-        env = self.env_config
-        return f"""type = s3
-    provider = Other
-    access_key_id = {env["R2_ACCESS_KEY_ID"]}
-    secret_access_key = {env["R2_SECRET_ACCESS_KEY"]}
-    region = auto
-    endpoint = {env["R2_ACCOUNT_ID"]}.r2.cloudflarestorage.com"""
