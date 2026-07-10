@@ -9,6 +9,7 @@ import edwh.tasks
 from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
 from ewok import Context
+from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
 from .forget import ResticForgetPolicy
@@ -338,10 +339,8 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
     print(source, target)
     source_repo = cli_repo(source)
     source_repo.prepare_env_for_restic(c)
-
     target_repo = cli_repo(target)
     target_repo.prepare_env_for_restic(c)
-
     with tempfile.TemporaryDirectory() as rclone:
         rclone_config = Path(rclone) / "rclone.config"
         rclone_config.write_text(f"""[{source}]
@@ -396,3 +395,12 @@ def backup_env_variables(c: Context, full: bool = False):
         print(f"\n{env_file}\n")
         c.sudo(f"cat {env_file}{grep_options}")
     print("\n")
+
+
+@task()
+def check_abstract_methode(c: Context):
+    for repository_class in registrations:
+        try:
+            x = repository_class()
+        except TypeError as e:
+            cprint(f"Repository missing abstract methode(s): {repository_class.__name__} \n {e}", color="red")
