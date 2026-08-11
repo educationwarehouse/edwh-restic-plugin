@@ -390,60 +390,77 @@ CI-enforced, because there are four places the same fact could drift apart: the 
 the class, the `Event` union alias, the runtime lookup table, and whether anything ever
 actually constructs the variant.
 
-**Derived, not written.** A dataclass field with a default exposes that default as a class
-attribute, so `BackupFailed.name` is `"backup.failed"` at runtime with no extra bookkeeping:
+**Registered at definition, via `__init_subclass__`.** Registration happens as each class is
+created, so there is no traversal to get wrong and nesting depth is irrelevant:
 
 ```python
-Event = BackupStarted | BackupSucceeded | ...     # hand-written: type checkers need it static
+@dataclass(frozen=True, kw_only=True)
+class EventBase:
+    variants: ClassVar[dict[str, type["EventBase"]]] = {}
 
-def _variants() -> set[type[EventBase]]:
-    """Concrete event classes defined in this module."""
-    found, stack = set(), [EventBase]
-    while stack:
-        for sub in stack.pop().__subclasses__():
-            if sub.__module__ == __name__:        # ignore anything a plugin subclasses
-                found.add(sub)
-            stack.append(sub)
-    return found
+    ts: datetime
+    level: Level
+    # ... common fields per §6
 
-EVENT_TYPES: dict[str, type[EventBase]] = {cls.name: cls for cls in _variants()}
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        super().__init_subclass__(**kwargs)
+        if "name" not in cls.__dict__:
+            return                       # intermediate base, or a subclass reusing a name
+        if (declared := get_args(cls.__annotations__["name"])) != (cls.name,):
+            raise TypeError(f"{cls.__name__}: annotation {declared} != default {cls.name!r}")
+        if clash := EventBase.variants.get(cls.name):
+            raise TypeError(f"{cls.__name__} reuses {cls.name!r} from {clash.__name__}")
+        EventBase.variants[cls.name] = cls
 ```
 
-The `__module__` filter matters: without it, a plugin that subclasses `BackupFailed` to add a
-field would silently enter core's registry and fail the tests below for the wrong reason.
+Two ordering facts make this work, both worth a comment in the source because they are easy to
+break:
 
-**CI-enforced.** Three tests, each catching a distinct drift:
+- **`__init_subclass__` runs before `@dataclass` is applied to the subclass.** `cls.name` and
+  `cls.__annotations__` come from the class body, so both are already populated — but
+  `dataclasses.fields(cls)` does *not* raise here, which is the trap. `__dataclass_fields__` is
+  inherited, so it silently returns only the **base's** fields: `['ts']`, not
+  `['ts', 'name', 'exit_code']`. Registration must therefore depend only on `__dict__` and
+  `__annotations__`, and any future field-level validation belongs in a test or a
+  `__post_init__`, not here.
+- **This module must not use `from __future__ import annotations`.** With postponed
+  evaluation, `cls.__annotations__["name"]` is the *string* `'Literal["backup.failed"]'` and
+  `get_args` returns `()`. Nothing else in `src/` uses it today, and 3.12 leaves it opt-in, so
+  this is a constraint to document rather than defend against.
+
+Guarding on `"name" in cls.__dict__` rather than `hasattr` is what lets intermediate bases and
+plugin subclasses exist: a class that does not declare its own name is not a new variant, and
+is correctly ignored instead of re-registering an inherited one.
+
+**Two invariants become import-time errors** rather than test failures — a name annotation
+disagreeing with its own default, and two variants sharing a name. Both are definition-time
+properties, so they should fail when you write the class, not when someone runs pytest.
+
+**What still needs a test.** Only what the hook structurally cannot see:
 
 ```python
 def test_union_matches_the_classes():
     """Orphan class, or junk in the union."""
-    static, runtime = set(typing.get_args(Event)), set(_variants())
+    static, runtime = set(typing.get_args(Event)), set(EventBase.variants.values())
     assert static == runtime, {
         "defined but missing from Event": runtime - static,
         "in Event but not an event class": static - runtime,
     }
 
-def test_name_annotation_matches_default():
-    """Catches the copy-paste: name: Literal["backup.failed"] = "backup.succeeded"."""
-    for cls in _variants():
-        assert typing.get_args(typing.get_type_hints(cls)["name"]) == (cls.name,), cls
-    assert len(EVENT_TYPES) == len(_variants()), "two variants share a name"
-
 def test_every_variant_is_actually_emitted(names_seen_this_session):
     """A variant nobody constructs is dead weight that still ships in the contract."""
-    assert set(EVENT_TYPES) - names_seen_this_session == set()
+    assert set(EventBase.variants) - names_seen_this_session == set()
 ```
 
-The second test earns its place: `get_type_hints` reads the annotation while `cls.name` reads
-the default, and a copy-pasted variant where those disagree is otherwise invisible — the class
-type-checks, dispatches, and lies about what it is.
+The first is unavoidable: `Event` must be a statically written alias because no type checker can
+follow a computed union, so something has to assert the hand-written half matches the registry.
 
-The third closes the gap the first two cannot see. A variant can exist, sit correctly in the
-union, and never be constructed by any emit site — the taxonomy table promises an event that
-never fires. `MemoryNotifier` (§10) is already the test-suite consumer subscribing to `*`, so
-collecting `event.name` into a session-scoped fixture makes emit-site coverage a set
-difference. This is also what keeps the `@emits` decorator honest: it maps a task to a family
-of names, and a typo there produces a variant that is never emitted rather than an error.
+The second closes the gap none of the above can see. A variant can be defined, registered, and
+present in the union, yet never constructed by any emit site — the taxonomy table then promises
+an event that never fires. `MemoryNotifier` (§10) is already the test-suite consumer subscribing
+to `*`, so collecting `event.name` into a session-scoped fixture makes emit-site coverage a set
+difference. It is also what keeps `@emits` honest: a typo there yields a silently-never-emitted
+variant rather than an error.
 
 ### Exhaustiveness
 
@@ -738,7 +755,7 @@ which case `from_toml_file("default", default_toml_path)` returns `None` too, be
 | Trust model | Documented, not enforced. A notifier is trusted like any dependency; the docs warn about log destinations (§7.1). |
 | Event fields | Allowlist. No `repo_uri`, no env passthrough. Full stdout/stderr permitted in `logs` on failures. |
 | Event schema | Tagged union of frozen dataclasses discriminated on a `Literal` `name`; no free-form `extra`. Exhaustive matching via `assert_never` is available and opt-in. |
-| Name/class sync | Class definitions are the source of truth. No flat `EventName` alias; the runtime table is derived from `__subclasses__()`, and three tests assert the union, the annotations and the emit sites all agree. |
+| Name/class sync | Class definitions are the source of truth. No flat `EventName` alias; variants self-register in `__init_subclass__`, which makes annotation/default disagreement and duplicate names import-time errors. Two tests cover the rest: the static `Event` union, and emit-site coverage. |
 | Plugin config access | Core resolves everything and passes `env` (parsed `.env`) plus `options` (resolved `[restic.notify.<name>]`) to `from_config`. Plugins never open `.toml`. |
 | Notifier activation | Explicit — named in `[restic.notify] channels`. Unlike repositories, not env-presence. |
 | Notifier failure | Caught, logged, timed out by the dispatcher, never fatal. A backup never fails because a channel is down. |
