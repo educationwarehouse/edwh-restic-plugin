@@ -101,6 +101,16 @@ class Repository(abc.ABC, metaclass=SortableMeta):
     def prepare_rclone_config(self) -> str:
         raise UnsupportedOperation(self._short_name, "move (no rclone config)")
 
+    def display_name(self) -> str:
+        """A human-readable identifier safe to put in a notification.
+
+        `uri` cannot serve: sftp, swift and b2 build host strings that can embed credentials, and
+        a notification may go to Discord. The default discloses only the registered short name, so
+        a repository that ignores this method leaks nothing -- override it to add something
+        informative but safe, e.g. f"s3:{self.bucket}".
+        """
+        return self._short_name
+
     def _add_missing_boilerpalte_restic_vars(self):
         """
         HOST, URI, RESTIC_REPOSITORY and RESTIC_HOST are usually the same so if those aren't set yet, \

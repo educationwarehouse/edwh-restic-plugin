@@ -27,6 +27,29 @@ from typing_extensions import NotRequired
 
 from .config import read_config
 
+# Re-exported so a plugin has exactly one import path to depend on, and never has to reach into
+# .events or .repositories internals. Everything a notifier or repository author needs is here.
+from .events import (  # noqa: F401
+    ALL_PHASES,
+    BackupEvent,
+    BasicEvent,
+    CheckEvent,
+    Event,
+    Failed,
+    ForgetEvent,
+    Level,
+    Phase,
+    RestoreEvent,
+    ScriptFailure,
+    Slow,
+    Started,
+    Status,
+    Succeeded,
+    WipeEvent,
+    level_for,
+    matches,
+)
+
 #: Bumped when a change breaks a plugin at runtime: a removed or renamed field, a changed
 #: method signature, a member dropped from the Event union. Adding an event operation does not
 #: bump it -- see docs/plugins-architecture.md section 7.2.
