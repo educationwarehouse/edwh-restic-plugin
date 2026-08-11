@@ -88,9 +88,6 @@ class _FakeContext:
 class _StubRepository(Repository):
     _short_name = "stub"
 
-    def _require_restic(self):
-        pass  # base __init__ otherwise shells out to `which restic` via a real Context
-
     def setup(self):
         pass
 

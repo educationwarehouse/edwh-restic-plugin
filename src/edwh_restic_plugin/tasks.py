@@ -44,11 +44,17 @@ def exits_on_restic_error(fn: "typing.Callable[P, R]") -> "typing.Callable[P, R]
     return wrapper
 
 
-def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repository:
+def cli_repo(
+    connection_choice: str = None,
+    restichostname: str = None,
+    require_restic: bool = False,
+) -> Repository:
     """
     Create a repository object and set up the connection to the backend.
     :param connection_choice: choose where you want to store the repo (local, SFTP, B2, swift)
     :param restichostname: which hostname to force for restic, or blank for default.
+    :param require_restic: install restic if missing. Off by default because it may prompt for
+        sudo and apt-install a package; `configure` opts in, since provisioning is its job.
     :return: repository object
     """
     env = read_dotenv(DOTENV)
@@ -73,6 +79,8 @@ def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repos
 
     print("Use connection: ", connection_lowercase)
     repo = repoclass()
+    if require_restic:
+        repo._require_restic()
     repo.setup()
     return repo
 
@@ -93,7 +101,8 @@ def configure(c, connection_choice=None, restichostname=None):
     # It has been decided to create a main path called 'backups' for each repository.
     # This can be changed or removed if desired.
     # A password is only passed with a few functions.
-    cli_repo(connection_choice, restichostname).configure(c)
+    # require_restic: this is the provisioning task, so it is the one that may install restic.
+    cli_repo(connection_choice, restichostname, require_restic=True).configure(c)
 
 
 @task

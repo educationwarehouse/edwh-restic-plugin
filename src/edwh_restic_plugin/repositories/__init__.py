@@ -140,11 +140,17 @@ class Repository(abc.ABC, metaclass=SortableMeta):
     env_config: dict[str, str]
 
     def _require_restic(self):
+        """Install restic if it is missing. May prompt for sudo, so callers opt in.
+
+        Deliberately not called from __init__: constructing a repository would then be able to
+        prompt for a password and apt-install a package, on every code path that touches one --
+        including read-only ones like the `env` task. Callers that genuinely need restic present
+        ask for it, via cli_repo(require_restic=True).
+        """
         _require_restic()
 
     def __init__(self, env_path: Path = DOTENV) -> None:
         super().__init__()
-        self._require_restic()
         env_path.touch(exist_ok=True)
         print("start repo init", self.__class__.__name__)
         self._env_path = env_path
