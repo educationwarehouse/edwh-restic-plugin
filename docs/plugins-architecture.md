@@ -364,13 +364,12 @@ Event = (
     | ForgetSucceeded | ForgetFailed
     | WipeStarted | WipeSucceeded
 )
-EventName = Literal[
-    "backup.started", "backup.succeeded", "backup.failed", "backup.script.failed",
-    "backup.slow", "restore.started", "restore.succeeded", "restore.failed",
-    "check.succeeded", "check.failed", "forget.succeeded", "forget.failed",
-    "wipe.started", "wipe.succeeded",
-]
 ```
+
+There is deliberately **no flat `EventName = Literal[...]` alias.** Each variant already pins
+its own name, so a second list is a second thing to forget to update, and it would buy
+nothing: config `events` entries are patterns (`backup.*`), not names, so they cannot be typed
+by it anyway.
 
 Three things this buys that the wide-dataclass version could not:
 
@@ -383,6 +382,68 @@ Three things this buys that the wide-dataclass version could not:
 - **`BackupSlow.elapsed` is not `duration`.** The wide version forced both concepts through
   one field, quietly meaning "final runtime" on some events and "so far" on others. Splitting
   the classes made the naming bug visible.
+
+### Keeping name, class, union and emit site in sync
+
+The class definitions are the single source of truth. Everything else is derived or
+CI-enforced, because there are four places the same fact could drift apart: the `Literal` on
+the class, the `Event` union alias, the runtime lookup table, and whether anything ever
+actually constructs the variant.
+
+**Derived, not written.** A dataclass field with a default exposes that default as a class
+attribute, so `BackupFailed.name` is `"backup.failed"` at runtime with no extra bookkeeping:
+
+```python
+Event = BackupStarted | BackupSucceeded | ...     # hand-written: type checkers need it static
+
+def _variants() -> set[type[EventBase]]:
+    """Concrete event classes defined in this module."""
+    found, stack = set(), [EventBase]
+    while stack:
+        for sub in stack.pop().__subclasses__():
+            if sub.__module__ == __name__:        # ignore anything a plugin subclasses
+                found.add(sub)
+            stack.append(sub)
+    return found
+
+EVENT_TYPES: dict[str, type[EventBase]] = {cls.name: cls for cls in _variants()}
+```
+
+The `__module__` filter matters: without it, a plugin that subclasses `BackupFailed` to add a
+field would silently enter core's registry and fail the tests below for the wrong reason.
+
+**CI-enforced.** Three tests, each catching a distinct drift:
+
+```python
+def test_union_matches_the_classes():
+    """Orphan class, or junk in the union."""
+    static, runtime = set(typing.get_args(Event)), set(_variants())
+    assert static == runtime, {
+        "defined but missing from Event": runtime - static,
+        "in Event but not an event class": static - runtime,
+    }
+
+def test_name_annotation_matches_default():
+    """Catches the copy-paste: name: Literal["backup.failed"] = "backup.succeeded"."""
+    for cls in _variants():
+        assert typing.get_args(typing.get_type_hints(cls)["name"]) == (cls.name,), cls
+    assert len(EVENT_TYPES) == len(_variants()), "two variants share a name"
+
+def test_every_variant_is_actually_emitted(names_seen_this_session):
+    """A variant nobody constructs is dead weight that still ships in the contract."""
+    assert set(EVENT_TYPES) - names_seen_this_session == set()
+```
+
+The second test earns its place: `get_type_hints` reads the annotation while `cls.name` reads
+the default, and a copy-pasted variant where those disagree is otherwise invisible — the class
+type-checks, dispatches, and lies about what it is.
+
+The third closes the gap the first two cannot see. A variant can exist, sit correctly in the
+union, and never be constructed by any emit site — the taxonomy table promises an event that
+never fires. `MemoryNotifier` (§10) is already the test-suite consumer subscribing to `*`, so
+collecting `event.name` into a session-scoped fixture makes emit-site coverage a set
+difference. This is also what keeps the `@emits` decorator honest: it maps a task to a family
+of names, and a typo there produces a variant that is never emitted rather than an error.
 
 ### Exhaustiveness
 
@@ -530,9 +591,9 @@ Supporting pieces, all cheap:
 
 - Ship **`py.typed`** (the package has none today) so plugin authors get real type checking
   across the boundary.
-- `Notifier`, `Repository`, `Event`, `EventName`, every event variant and `CONTRACT_VERSION`
-  are importable from **one stable module path** (`edwh_restic_plugin.plugins`), so plugins
-  never reach into `.repositories` internals.
+- `Notifier`, `Repository`, `Event`, every event variant and `CONTRACT_VERSION` are importable
+  from **one stable module path** (`edwh_restic_plugin.plugins`), so plugins never reach into
+  `.repositories` internals.
 - The dispatcher **duck-types** `send` rather than requiring `isinstance`, so a notifier
   package can type against the ABC without a hard runtime import of it.
 
@@ -677,6 +738,7 @@ which case `from_toml_file("default", default_toml_path)` returns `None` too, be
 | Trust model | Documented, not enforced. A notifier is trusted like any dependency; the docs warn about log destinations (§7.1). |
 | Event fields | Allowlist. No `repo_uri`, no env passthrough. Full stdout/stderr permitted in `logs` on failures. |
 | Event schema | Tagged union of frozen dataclasses discriminated on a `Literal` `name`; no free-form `extra`. Exhaustive matching via `assert_never` is available and opt-in. |
+| Name/class sync | Class definitions are the source of truth. No flat `EventName` alias; the runtime table is derived from `__subclasses__()`, and three tests assert the union, the annotations and the emit sites all agree. |
 | Plugin config access | Core resolves everything and passes `env` (parsed `.env`) plus `options` (resolved `[restic.notify.<name>]`) to `from_config`. Plugins never open `.toml`. |
 | Notifier activation | Explicit — named in `[restic.notify] channels`. Unlike repositories, not env-presence. |
 | Notifier failure | Caught, logged, timed out by the dispatcher, never fatal. A backup never fails because a channel is down. |
