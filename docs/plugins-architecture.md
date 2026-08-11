@@ -917,10 +917,14 @@ Each step is independently shippable and leaves the tree green. Baseline at time
      This is not blocking for steps 1–7, but it is worth knowing that "the gate is green" is not
      true here yet, so a new module arriving with its own findings will be hard to distinguish
      from the existing backlog.
-1. **Refactor exits into exceptions** (§2.4) — `ResticError`, `NoScriptsFound`,
-   `ResticScriptError`; `get_scripts`, `execute_files` and `sftp.py` raise, `tasks.py` catches
-   at the top level and sets the process exit code there. Fix the `max(file_codes)` precedence
-   bug. *No new features; changes observable exit codes, so it goes first and alone.*
+1. ~~**Refactor exits into exceptions** (§2.4)~~ — **done.** `exceptions.py` defines
+   `ResticError`, `NoScriptsFound`, `ResticScriptError`, `ResticConnectionError` and
+   `ScriptFailure`; `get_scripts`, `execute_files` and `sftp.py` raise instead of exiting, and
+   `@exits_on_restic_error` in `tasks.py` converts a `ResticError` back into its exit code at
+   the one place that knows the process is ending. The `max(file_codes)` precedence bug is fixed
+   — `ResticScriptError.exit_code` is now the worst script's real code rather than `True`.
+   Exit codes are preserved: 255 for no scripts, worst-script code for script failures, 1
+   otherwise.
 2. **Discovery + registry generalisation** (§3) — `plugins.py`, entry points, scoped
    `discover()`, and the `registrations.get()` fix (§2.2).
 3. **Narrow the abstract surface** (§2.3) — `UnsupportedOperation`, graceful degradation
@@ -952,3 +956,9 @@ found while mapping the code, not proposed as part of it.
   Verifying the snapshot exists and is readable before destroying anything is a separate,
   small change, and worth filing on its own.
 - **`get_or_copy_policy` third branch is unreachable.** See §9.1 for the derivation.
+- **`Repository.__init__` shells out.** It calls `self._require_restic()`, which runs
+  `which restic` through a fresh `invoke.Context`, and it touches `.env` on disk. Constructing a
+  repository therefore performs a subprocess and file I/O, so every test that needs an instance
+  must override `_require_restic` (see `tests/test_exceptions.py`). Fine as behaviour, awkward as
+  a constructor; worth moving to the tasks that actually need restic present — `require_restic`
+  already exists as a task for exactly that.

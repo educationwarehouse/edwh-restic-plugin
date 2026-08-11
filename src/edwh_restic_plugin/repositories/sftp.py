@@ -2,6 +2,7 @@ import os
 
 from restic_reaper import SftpConfig, wipe_repository_sync
 
+from ..exceptions import ResticConnectionError
 from . import Repository, register
 
 
@@ -55,8 +56,8 @@ class SFTPRepository(Repository):
         os.environ["RESTIC_PASSWORD"] = self.password
         ran = c.run(f'ssh {self.hostname} "exit"', warn=True, hide=True)
         if not ran.ok:
-            print(
-                """
+            raise ResticConnectionError(
+                f"""could not ssh to '{self.hostname}'.
                 SSH config file not (properly) configured, configure according to the following format:
                 Host romy
                 HostName romy.edwh.nl
@@ -66,7 +67,6 @@ class SFTPRepository(Repository):
                 For more information, read the ssh_config manual (man ssh_config)
                 """
             )
-            exit(1)
 
     @property
     def uri(self):

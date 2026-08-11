@@ -20,6 +20,7 @@ from tqdm import tqdm
 from typing_extensions import NotRequired
 
 from ..env import DOTENV, check_env, read_dotenv
+from ..exceptions import NoScriptsFound, ResticScriptError, ScriptFailure
 from ..forget import ResticForgetPolicy
 from ..helpers import _require_restic, camel_to_snake, fix_tags
 
@@ -238,8 +239,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         files = [str(file) for file in DEFAULT_BACKUP_FOLDER.glob(f"{verb}_{target}*")]
         # check if no files are found
         if not files:
-            print("no files found with target:", target)
-            sys.exit(255)
+            raise NoScriptsFound(verb, target, DEFAULT_BACKUP_FOLDER)
 
         return files
 
@@ -318,8 +318,14 @@ class Repository(abc.ABC, metaclass=SortableMeta):
             else:
                 cprint(f"[failure ({status_code})] {filename}", color="red")
 
-        if worst_status_code := max(file_codes) > 0:
-            exit(worst_status_code)
+        # note the parens: `worst := max(...) > 0` would bind the comparison, not the code,
+        # so every failure used to exit 1 regardless of what the script actually returned.
+        if failures := [
+            ScriptFailure(script=filename, exit_code=status_code)
+            for filename, status_code in zip(files, file_codes)
+            if status_code != 0
+        ]:
+            raise ResticScriptError(failures)
 
     def backup(self, c, verbose: bool, target: str, message: str | None):
         """

@@ -1,21 +1,47 @@
+import functools
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import typing
 from pathlib import Path
 
 import edwh.tasks
+import invoke
 from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
 from ewok import Context
 from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
+from .exceptions import ResticError
 from .forget import ResticForgetPolicy
 from .helpers import _require_restic
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
+
+P = typing.ParamSpec("P")
+R = typing.TypeVar("R")
+
+
+def exits_on_restic_error(fn: "typing.Callable[P, R]") -> "typing.Callable[P, R]":
+    """Turn a ResticError into a process exit code, at the outermost point that can.
+
+    Library code raises instead of calling sys.exit() so that callers can react to a failure --
+    print it, notify about it, clean up after it. Something still has to produce the exit code
+    the CLI contract promises, and a task is the only place that knows the process is ending.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: "P.args", **kwargs: "P.kwargs") -> "R":
+        try:
+            return fn(*args, **kwargs)
+        except ResticError as e:
+            cprint(str(e), color="red", file=sys.stderr)
+            sys.exit(e.exit_code)
+
+    return wrapper
 
 
 def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repository:
@@ -57,6 +83,7 @@ def require_restic(c):
 
 
 @task(aliases=("setup", "init"))
+@exits_on_restic_error
 def configure(c, connection_choice=None, restichostname=None):
     """Setup or update the backup command for your environment.
     connection_choice: choose where you want to store the repo (local, SFTP, B2, swift)
@@ -70,6 +97,7 @@ def configure(c, connection_choice=None, restichostname=None):
 
 
 @task
+@exits_on_restic_error
 def backup(
     c,
     target: str = "",
@@ -118,6 +146,7 @@ def backup(
 
 
 @task
+@exits_on_restic_error
 def restore(c, connection_choice: str = None, snapshot: str = "latest", target: str = "", verbose: bool = True):
     """
     The restore function restores the latest backed-up files by default and puts them in a restore folder.
@@ -157,6 +186,7 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
 
 
 @task(iterable=["tag"], aliases=["list"])
+@exits_on_restic_error
 def snapshots(c, connection_choice: str = None, tag: list[str] = None, n: int = 1, verbose: bool = False):
     """
     With this you can see per repo which repo is made when and where, \
@@ -181,6 +211,7 @@ def interactive(conn: Repository):
 
 
 @task(pre=[require_restic])
+@exits_on_restic_error
 def run(c, connection_choice: str = None, command: typing.Optional[str] = None):
     """
     This function prepares for restic and runs the input command until the user types "exit".
@@ -201,6 +232,7 @@ def run(c, connection_choice: str = None, command: typing.Optional[str] = None):
 
 
 @task()
+@exits_on_restic_error
 def env(c, connection_choice: str = None):
     """
 
@@ -218,6 +250,7 @@ def env(c, connection_choice: str = None):
 
 
 @task()
+@exits_on_restic_error
 def forget(c: Context, connection: str = None, policy: str = None, dry: bool = False):
     """
     Run restic forget (with prune) based on a specific policy defined in a TOML configuration file.
@@ -266,6 +299,7 @@ def forget(c: Context, connection: str = None, policy: str = None, dry: bool = F
 
 
 @task()
+@exits_on_restic_error
 def unlock(c: Context, connection: str = None, remove_all: bool = False):
     """
     Run restic unlock.
@@ -284,6 +318,7 @@ def unlock(c: Context, connection: str = None, remove_all: bool = False):
 
 
 @task(aliases=("stats", "stat"))
+@exits_on_restic_error
 def du(
     c: Context,
     connection: str = None,
@@ -314,6 +349,7 @@ def du(
 
 
 @task()
+@exits_on_restic_error
 def wipe(c, connection: str = None):
     repo = cli_repo(connection)
     repo.prepare_env_for_restic(c)
@@ -327,6 +363,7 @@ def wipe(c, connection: str = None):
 
 
 @task()
+@exits_on_restic_error
 def move(c: Context, source: str = "", target: str = "", dry: bool = False):
     """Moves everything from source bucket to target bucket
     Args:
