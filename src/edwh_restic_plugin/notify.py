@@ -20,7 +20,7 @@ from termcolor import cprint
 from .config import read_config
 from .env import DOTENV, read_dotenv
 from .events import BasicEvent, Failed, Level, Slow, Status, Succeeded, level_for, matches
-from .plugins import CONTRACT_VERSION, Registration, Registry
+from .registry import CONTRACT_VERSION, Registration, Registry
 
 if typing.TYPE_CHECKING:
     from .repositories import Repository

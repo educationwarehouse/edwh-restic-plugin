@@ -19,7 +19,7 @@ from ..env import DOTENV, check_env, read_dotenv
 from ..exceptions import NoScriptsFound, ResticScriptError, ScriptFailure, UnsupportedOperation
 from ..forget import ResticForgetPolicy
 from ..helpers import _require_restic, camel_to_snake, fix_tags
-from ..plugins import Registration, Registry
+from ..registry import Registration, Registry
 
 if typing.TYPE_CHECKING:
     from restic_reaper import WipeOutcome
