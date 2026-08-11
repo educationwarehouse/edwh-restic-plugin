@@ -91,7 +91,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
     # could work. They degrade at the point of use instead: `wipe` and `move` catch
     # UnsupportedOperation and say so.
 
-    def wipe(self, dry: bool = False) -> "WipeOutcome":
+    def wipe(self, dry: bool = False) -> "WipeOutcome":  # noqa: ARG002 -- signature is the contract
         raise UnsupportedOperation(self._short_name, "wipe")
 
     @property
@@ -371,12 +371,27 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         """
         self.execute_files(c, target, "restore", verbose, snapshot=snapshot)
 
-    def check(self, c):
-        """
-        Checks the integrity of the backup repository.
+    def check(self, c: Context, read_data: bool = False, subset: str = "") -> None:
+        """Check the integrity of the backup repository.
+
+        Structure only by default. This used to hardcode --read-data, which re-downloads the whole
+        repository -- defensible for a hand-run check, expensive as a scheduled one. Nothing called
+        this method, so changing the default broke no caller.
+
+        Args:
+            read_data: read and verify every pack file.
+            subset: read a subset only, e.g. "5%", "1G" or "2/8". Ignored when read_data is set.
         """
         self.prepare_env_for_restic(c)
-        c.run(f"restic {self.hostarg} -r {self.uri} check --read-data")
+
+        if read_data:
+            depth = " --read-data"
+        elif subset:
+            depth = f" --read-data-subset={subset}"
+        else:
+            depth = ""
+
+        c.run(f"restic {self.hostarg} -r {self.uri} check{depth}")
 
     def snapshot(self, c: Context, tags: list[str] = None, n: int = 2, verbose: bool = False):
         """

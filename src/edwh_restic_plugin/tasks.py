@@ -1,9 +1,11 @@
+import contextlib
 import functools
 import json
 import os
 import subprocess
 import sys
 import tempfile
+import time
 import typing
 from pathlib import Path
 
@@ -15,11 +17,24 @@ from ewok import Context
 from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
-from .exceptions import ResticError, UnsupportedOperation
+from .events import (
+    BackupEvent,
+    BasicEvent,
+    CheckEvent,
+    Failed,
+    ForgetEvent,
+    RestoreEvent,
+    Started,
+    Succeeded,
+    WipeEvent,
+)
+from .exceptions import ResticError, ResticScriptError, UnsupportedOperation
 from .forget import ResticForgetPolicy
 from .helpers import _require_restic
+from .notify import Emitter
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
+from .watchdog import Watchdog
 
 P = typing.ParamSpec("P")
 R = typing.TypeVar("R")
@@ -85,6 +100,79 @@ def cli_repo(
     return repo
 
 
+@contextlib.contextmanager
+def repo_context(
+    connection_choice: str | None,
+    event_class: type[BasicEvent],
+    *,
+    require_restic: bool = False,
+    **fields: typing.Any,
+) -> "typing.Iterator[Repository]":
+    """Resolve a repository and report the operation's lifecycle around the block.
+
+    Yields the repository, so resolution and reporting are one construct:
+
+        with repo_context(connection_choice, BackupEvent, target=target) as repo:
+            repo.backup(c, verbose, target, message)
+
+    __enter__ emits `started` and arms the watchdog; __exit__ disarms it and emits `succeeded` or
+    `failed` -- phase chosen from the exception or its absence, duration from the elapsed time.
+
+    Resolution happens *inside*, so a mistyped --connection-choice is reported rather than
+    silently killing a cron job. There is no Repository yet at that point, so repo_display falls
+    back to the choice string.
+
+    The second argument is the operation class, which is all this needs: phases are universal, so
+    there is no family mapping to look up.
+    """
+    emitter = Emitter(event_class, None, connection_choice or "default", dict(fields))
+    started = time.monotonic()
+    watchdog = None
+
+    try:
+        repo = cli_repo(connection_choice, require_restic=require_restic)
+        emitter.repo = repo
+        emitter.repo_name = repo._short_name
+    except Exception as e:
+        emitter.emit(Failed(duration=time.monotonic() - started, exit_code=_exit_code_of(e), logs=str(e)))
+        raise
+
+    emitter.emit(Started())
+    watchdog = Watchdog(emitter, target=fields.get("target"))
+    watchdog.arm()
+
+    try:
+        yield repo
+    except Exception as e:
+        watchdog.disarm()
+        emitter.emit(Failed(duration=time.monotonic() - started, exit_code=_exit_code_of(e), logs=_logs_of(e)))
+        raise
+    else:
+        watchdog.disarm()
+        emitter.emit(Succeeded(duration=time.monotonic() - started))
+
+
+def _exit_code_of(error: BaseException) -> int:
+    if isinstance(error, ResticError):
+        return error.exit_code
+
+    return 1
+
+
+def _logs_of(error: BaseException) -> str:
+    """Full stdout/stderr where restic gave us any, else the exception text."""
+    if isinstance(error, ResticScriptError):
+        detail = "\n".join(f"{f.script} exited {f.exit_code}" for f in error.failures)
+        return f"{error}\n{detail}"
+
+    if (result := getattr(error, "result", None)) is not None:
+        parts = [getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or ""]
+        if joined := "\n".join(p for p in parts if p):
+            return joined
+
+    return str(error)
+
+
 @task
 def require_restic(c):
     _require_restic(c)
@@ -146,12 +234,15 @@ def backup(
     # a file called 'foo' (optionally having a given header, no wildcards for the file name supported).
     # --exclude-larger-than 'size', Specified once to excludes files larger than the given size.
     # Please see 'restic help backup' for more specific information about each exclude option.
-    repo = cli_repo(connection_choice)
-    repo.backup(c, verbose, target, message)
+    with repo_context(connection_choice, BackupEvent, target=target or None, message=message) as repo:
+        repo.backup(c, verbose, target, message)
 
     # if policy is available: execute forget after backing up:
+    # separate operation, separate event -- a backup that succeeded and a forget that failed are
+    # different facts, and collapsing them would hide the second.
     if with_forget and (policy := repo.determine_forget_policy()):
-        repo.forget(c, policy)
+        with repo_context(connection_choice, ForgetEvent, policy=policy.to_string()) as forget_repo:
+            forget_repo.forget(c, policy)
 
 
 @task
@@ -190,8 +281,9 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
         for volume_name in volumes_to_remove:
             c.run(f"docker volume rm {volume_name}")
 
-    cli_repo(connection_choice).restore(c, verbose, target, snapshot)
-    # print("`inv up` to restart the services.")
+    with repo_context(connection_choice, RestoreEvent, target=target or None, snapshot=snapshot) as repo:
+        repo.restore(c, verbose, target, snapshot)
+    # print("`edwh up` to restart the services.")
 
 
 @task(iterable=["tag"], aliases=["list"])
@@ -298,13 +390,35 @@ def forget(c: Context, connection: str = None, policy: str = None, dry: bool = F
         https://restic.readthedocs.io/en/latest/060_forget.html#removing-snapshots-according-to-a-policy
     """
 
-    repo = cli_repo(connection)
+    with repo_context(connection, ForgetEvent, policy=policy) as repo:
+        repo.forget(
+            c,
+            policy=policy and ResticForgetPolicy.from_string(policy),
+            dry=dry,
+        )
 
-    repo.forget(
-        c,
-        policy=policy and ResticForgetPolicy.from_string(policy),
-        dry=dry,
-    )
+
+@task(aliases=("verify",))
+@exits_on_restic_error
+def check(c: Context, connection: str = None, read_data: bool = False, subset: str = ""):
+    """Verify repository integrity.
+
+    Silent repository corruption is the failure mode you otherwise discover during a restore,
+    which makes this the most valuable thing to run on a schedule.
+
+    Structure only by default. `--read-data` re-reads every byte, which is thorough but pays full
+    egress on a cloud backend every run; `--subset=5%` (or `1G`, or `2/8`) reads a sample, and
+    restic picks a different one each time, so repeated runs converge on full coverage without
+    ever paying for it at once.
+
+    Args:
+        c (Context)
+        connection (str, optional): repository to check; defaults to the .env-derived one.
+        read_data (bool): read and verify every pack file.
+        subset (str): read a subset, e.g. "5%", "1G" or "2/8". Ignored if read_data is set.
+    """
+    with repo_context(connection, CheckEvent, read_data=read_data, subset=subset) as repo:
+        repo.check(c, read_data=read_data, subset=subset)
 
 
 @task()
@@ -363,13 +477,16 @@ def wipe(c, connection: str = None):
     repo = cli_repo(connection)
     repo.prepare_env_for_restic(c)
 
+    # Confirm before entering repo_context: declining is not an operation that started, so it must
+    # not emit wipe.started followed by nothing.
     confirmation = input(f"Type YES to wipe repository {repo!r}: ").strip()
     if confirmation != "YES":
         print("Aborted wipe operation.")
         return
 
     try:
-        print(repo.wipe())
+        with repo_context(connection, WipeEvent) as wipe_repo:
+            print(wipe_repo.wipe())
     except UnsupportedOperation as e:
         cprint(str(e), color="yellow")
 

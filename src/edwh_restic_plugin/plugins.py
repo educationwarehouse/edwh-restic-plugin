@@ -79,23 +79,30 @@ class Registry(typing.Generic[T]):
 
     def __init__(self) -> None:
         # _queue is for internal use by heapq only! external api should use .queue !!!
-        self._queue: list[tuple[int, type[T], Registration]] = []
+        self._queue: list[tuple[int, int, type[T], Registration]] = []
         # aliases stores a reference for each name to the plugin class
         self._aliases: dict[str, type[T]] = {}
         self._discovered = False
+        # Tie-breaker, so heapq never has to compare the plugin classes themselves. Repository can
+        # be compared (SortableMeta defines __lt__/__gt__ for exactly this reason) but nothing else
+        # can, and requiring every future plugin base to carry that metaclass would be a trap.
+        # A counter also makes equal priorities resolve in registration order rather than
+        # arbitrarily.
+        self._counter = 0
 
     def push(self, plugin: type[T], settings: Registration) -> None:
         priority = settings.get("priority", -1)
         if priority < 0:
             priority = sys.maxsize - priority  # very high int
 
-        heapq.heappush(self._queue, (priority, plugin, settings))
+        self._counter += 1
+        heapq.heappush(self._queue, (priority, self._counter, plugin, settings))
         self._aliases[settings["short_name"]] = plugin
         for alias in settings.get("aliases", ()):
             self._aliases[alias] = plugin
 
     @property
-    def queue(self) -> list[tuple[int, type[T], Registration]]:
+    def queue(self) -> list[tuple[int, int, type[T], Registration]]:
         if not self._discovered:
             self.discover()
 
@@ -120,12 +127,12 @@ class Registry(typing.Generic[T]):
 
     def to_ordered_dict(self) -> "OrderedDict[str, type[T]]":
         ordered_dict: OrderedDict[str, type[T]] = OrderedDict()
-        for _, item, settings in self.queue:
+        for _, _, item, settings in self.queue:
             ordered_dict[settings["short_name"]] = item
         return ordered_dict
 
     def __iter__(self) -> typing.Generator[type[T], None, None]:
-        return (item[1] for item in self.queue)
+        return (entry[2] for entry in self.queue)
 
     def __bool__(self) -> bool:
         return bool(self.queue)
