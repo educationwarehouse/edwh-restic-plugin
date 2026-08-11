@@ -956,9 +956,15 @@ found while mapping the code, not proposed as part of it.
   Verifying the snapshot exists and is readable before destroying anything is a separate,
   small change, and worth filing on its own.
 - **`get_or_copy_policy` third branch is unreachable.** See §9.1 for the derivation.
-- **`Repository.__init__` shells out.** It calls `self._require_restic()`, which runs
-  `which restic` through a fresh `invoke.Context`, and it touches `.env` on disk. Constructing a
-  repository therefore performs a subprocess and file I/O, so every test that needs an instance
-  must override `_require_restic` (see `tests/test_exceptions.py`). Fine as behaviour, awkward as
-  a constructor; worth moving to the tasks that actually need restic present — `require_restic`
-  already exists as a task for exactly that.
+- **Constructing a `Repository` can install a package.** `__init__` calls `_require_restic()`,
+  which on a `which restic` miss runs `require_sudo()` and then `sudo apt install -y restic` plus
+  `sudo restic self-update`. So object construction may prompt for a password and mutate the
+  host.
+
+  On any machine that already has restic this is one cheap `which`, and self-installing the
+  dependency is arguably the right behaviour for `backup`. The part worth knowing is that it is
+  *unconditional*: every code path that touches a `Repository` inherits it whether or not it
+  needs restic. Today that includes `edwh restic.env`, which only diffs `os.environ` and never
+  runs restic, and `move`, which pays it twice. It will also include anything the notifier work
+  adds, and any test constructing an instance — hence the `_require_restic` override in
+  `tests/test_exceptions.py`, which is the seam to use rather than a defect to fix.
