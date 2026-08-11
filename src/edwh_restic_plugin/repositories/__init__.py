@@ -16,7 +16,7 @@ from termcolor import cprint
 from tqdm import tqdm
 
 from ..env import DOTENV, check_env, read_dotenv
-from ..exceptions import NoScriptsFound, ResticScriptError, ScriptFailure
+from ..exceptions import NoScriptsFound, ResticScriptError, ScriptFailure, UnsupportedOperation
 from ..forget import ResticForgetPolicy
 from ..helpers import _require_restic, camel_to_snake, fix_tags
 from ..plugins import Registration, Registry
@@ -76,23 +76,30 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         """Return the prefix required for restic to indicate the protocol, for example sftp:hostname:"""
         raise NotImplementedError("Prefix unknown in base class")
 
-    @abc.abstractmethod
-    def wipe(self, dry: bool = False) -> "WipeOutcome":
-        raise NotImplementedError("Implement provider-specific wipe logic")
-
-    @property
-    @abc.abstractmethod
-    def bucket(self):
-        return NotImplementedError("Implement bucket name from env to return")
-
-    @abc.abstractmethod
-    def prepare_rclone_config(self) -> str:
-        raise NotImplementedError("Implement provider-specific rclone config logic")
-
     ###########################
     # END OF NOT IMPLEMENTED, #
     #    START BASE CLASS:    #
     ###########################
+
+    #####################################
+    # OPTIONAL: override to support      #
+    # `wipe` and `move` for your backend #
+    #####################################
+
+    # These three used to be abstract, which meant a third-party repository had to implement all
+    # six members to be instantiable -- three of them only so that two tasks it may never use
+    # could work. They degrade at the point of use instead: `wipe` and `move` catch
+    # UnsupportedOperation and say so.
+
+    def wipe(self, dry: bool = False) -> "WipeOutcome":
+        raise UnsupportedOperation(self._short_name, "wipe")
+
+    @property
+    def bucket(self) -> str:
+        raise UnsupportedOperation(self._short_name, "bucket (needed by move)")
+
+    def prepare_rclone_config(self) -> str:
+        raise UnsupportedOperation(self._short_name, "move (no rclone config)")
 
     def _add_missing_boilerpalte_restic_vars(self):
         """

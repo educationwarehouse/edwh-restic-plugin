@@ -56,3 +56,18 @@ class ResticScriptError(ResticError):
 
 class ResticConnectionError(ResticError):
     """The repository backend could not be reached or is misconfigured."""
+
+
+class UnsupportedOperation(ResticError):
+    """This repository type does not implement the requested operation.
+
+    Not every backend can do everything -- `wipe` and `move` need provider-specific bucket and
+    rclone support that a plain restic target does not have. Declaring those abstract would make
+    every third-party repository implement three methods it does not need just to be
+    instantiable, so they degrade at the point of use instead.
+    """
+
+    def __init__(self, repository: str, operation: str) -> None:
+        self.repository = repository
+        self.operation = operation
+        super().__init__(f"repository '{repository}' does not support {operation}")

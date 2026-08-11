@@ -15,7 +15,7 @@ from ewok import Context
 from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
-from .exceptions import ResticError
+from .exceptions import ResticError, UnsupportedOperation
 from .forget import ResticForgetPolicy
 from .helpers import _require_restic
 from .repositories import Repository, registrations
@@ -368,7 +368,10 @@ def wipe(c, connection: str = None):
         print("Aborted wipe operation.")
         return
 
-    print(repo.wipe())
+    try:
+        print(repo.wipe())
+    except UnsupportedOperation as e:
+        cprint(str(e), color="yellow")
 
 
 @task()
@@ -387,17 +390,26 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
     source_repo.prepare_env_for_restic(c)
     target_repo = cli_repo(target)
     target_repo.prepare_env_for_restic(c)
+
+    # Fail before touching anything: move needs rclone config and a bucket name from *both*
+    # repositories, and a backend that cannot provide them should say so rather than half-run.
+    try:
+        source_config, target_config = source_repo.prepare_rclone_config(), target_repo.prepare_rclone_config()
+        source_bucket, target_bucket = source_repo.bucket, target_repo.bucket
+    except UnsupportedOperation as e:
+        return cprint(str(e), color="yellow")
+
     with tempfile.TemporaryDirectory() as rclone:
         rclone_config = Path(rclone) / "rclone.config"
         rclone_config.write_text(f"""[{source}]
-{source_repo.prepare_rclone_config()}
+{source_config}
 
 [{target}]
-{target_repo.prepare_rclone_config()}""")
+{target_config}""")
 
         rclone = f"rclone --config {rclone_config}"
         check_target_files = c.run(
-            f"{rclone} lsf -R --files-only {target}:{target_repo.bucket} | wc -l", hide=True
+            f"{rclone} lsf -R --files-only {target}:{target_bucket} | wc -l", hide=True
         ).stdout.strip()
         if int(check_target_files) > 0:
             if not edwh.tasks.confirm(
@@ -408,7 +420,7 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
         params: str = ""
         if dry:
             params += "--dry-run"
-        c.run(f"{rclone} sync {source}:{source_repo.bucket} {target}:{target_repo.bucket} {params}")
+        c.run(f"{rclone} sync {source}:{source_bucket} {target}:{target_bucket} {params}")
 
 
 @task(pre=[edwh.tasks.require_sudo])
@@ -443,10 +455,23 @@ def backup_env_variables(c: Context, full: bool = False):
     print("\n")
 
 
-@task()
+@task(aliases=("check-abstract-methods",))
 def check_abstract_methode(c: Context):
+    """Report repositories that cannot be instantiated because an abstract member is missing.
+
+    Only setup, prepare_for_restic and uri are required. wipe, bucket and prepare_rclone_config
+    are optional and degrade at the point of use, so a repository lacking them is fine here.
+    """
+    missing = False
     for repository_class in registrations:
         try:
-            x = repository_class()
+            repository_class()
         except TypeError as e:
+            missing = True
             cprint(f"Repository missing abstract methode(s): {repository_class.__name__} \n {e}", color="red")
+
+    if not missing:
+        cprint(
+            f"All {len(registrations.to_ordered_dict())} repositories implement setup, prepare_for_restic and uri.",
+            color="green",
+        )
