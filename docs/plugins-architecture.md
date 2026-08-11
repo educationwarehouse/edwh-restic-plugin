@@ -22,6 +22,11 @@ Explicit non-goals:
   background queue would silently drop messages.
 - **No message template language.** Notifiers get an `Event` object and a default
   `format()` they may override in Python.
+- **No plugin sandboxing.** A notifier runs in-process and is trusted like any other
+  dependency. Every containment mechanism available in Python leaks anyway, and the
+  realistic author of a plugin here is us, or one person solving one specific problem for
+  themselves — not an untrusted marketplace. The event schema is built to prevent
+  *accidental* disclosure (§7.1); nothing pretends to stop deliberate disclosure.
 
 ### Naming
 
@@ -161,10 +166,19 @@ class AzureRepository(Repository):
     @property
     def uri(self) -> str:
         return f"azure:{self.env_config['AZURE_NAME']}:/"
+
+    def display_name(self) -> str:            # optional; defaults to _short_name
+        return f"azure:{self.env_config['AZURE_NAME']}"
 ```
 
 `wipe` and `move` degrade with a clear message; `backup`, `restore`, `check`, `forget`,
 `snapshots`, `du`, `run` all work.
+
+`display_name()` is the only addition to the `Repository` surface, and it exists for §7.1:
+events need something human-readable to identify *which* repository they concern, and `uri`
+cannot serve because several implementations embed credentials in it. The default returns
+`_short_name` alone, so a plugin that ignores this method discloses nothing — the safe
+behaviour is the one you get by doing nothing.
 
 Two conventions worth documenting rather than enforcing, because they are load-bearing
 elsewhere in the code:
@@ -180,6 +194,7 @@ elsewhere in the code:
 ```python
 class Notifier(abc.ABC):
     _short_name: str                      # set by @register_notifier()
+    contract: int = CONTRACT_VERSION      # see §7.2
     subscribes: tuple[str, ...] = ("*",)  # default; overridden by .toml routing
 
     @classmethod
@@ -191,12 +206,17 @@ class Notifier(abc.ABC):
 
     @abc.abstractmethod
     def send(self, event: Event) -> None:
-        """Deliver. May raise; the dispatcher swallows and reports."""
+        """Deliver. May raise; the dispatcher catches, logs and continues."""
 ```
 
-Returning `None` from `from_config` rather than raising is what makes "configured =
-active" work without a separate enable flag, and matches how repositories are selected by
-the presence of their env vars.
+**Activation is explicit.** Unlike repositories — which self-select on the presence of
+their env vars — a notifier runs only if `[restic.notify] channels` names it. Installing a
+package therefore changes nothing until it is wired up, and "why did this fire" has exactly
+one answer, greppable in one file.
+
+`from_config` returning `None` remains the way a *named but unconfigured* channel opts out:
+listed in `channels` but with no token in `.env` means "not yet", logged once, not an error.
+That keeps a partially provisioned machine from failing its backups over notification setup.
 
 ## 6. Event model
 
@@ -209,7 +229,6 @@ class Event:
     ts: datetime
     level: Literal["info", "warning", "error"]
     repo: str                    # short_name, e.g. "s3"
-    repo_uri: str                # REDACTED — see §7
     host: str                    # RESTICHOSTNAME or platform hostname
     project: str                 # cwd name, or [restic.notify] project
     target: str | None           # backup target ("files", "stream", ...)
@@ -217,8 +236,13 @@ class Event:
     exit_code: int | None
     snapshot: str | None
     message: str | None          # the snapshot message / error text
-    extra: Mapping[str, Any]     # event-specific, redacted
+    logs: str | None             # restic stdout/stderr on failures — see §7.1
+    extra: Mapping[str, str]     # event-specific; populated only by in-package emit sites
 ```
+
+Note what is *absent*: no `repo_uri`, no `env`, no `os.environ` passthrough. That is the
+whole of §7.1. The fields above are the complete contract surface — adding one is a
+deliberate act, reviewed as such.
 
 ### Taxonomy
 
@@ -232,7 +256,7 @@ class Event:
 | `restore.started` / `.succeeded` / `.failed` | info/info/error | `restore` also destroys pg volumes (`tasks.py:143`), so failure here is high-severity in practice. |
 | `check.succeeded` / `check.failed` | info/error | **The most valuable pair.** Silent repository corruption is the failure mode you otherwise discover during a restore. |
 | `forget.succeeded` / `.failed` | info/error | Include snapshots removed; a policy that suddenly prunes 400 snapshots is a signal. |
-| `wipe.started` / `.succeeded` | warning/warning | Destructive and irreversible — always notify, regardless of routing config. |
+| `wipe.started` / `.succeeded` | warning/warning | Destructive and irreversible, but user-initiated. Filterable like everything else. |
 
 `configure` and `snapshots` emit nothing; they are interactive and read-only.
 
@@ -254,32 +278,98 @@ written by *plugin authors*, who must not have to remember to emit anything. Fin
 ### Dispatch semantics
 
 - Sequential, synchronous, in registration order.
-- Per-notifier timeout (default 5s), enforced by the notifier's own transport.
 - Every `send()` in `try/except Exception` — logged to stderr, swallowed. A dead Discord
   webhook must never turn a good backup into a failed cron job. Confirmed decision, §10.
+- **Wall-clock timeout per notifier (default 5s), enforced by the dispatcher**, not
+  delegated to the notifier's transport. Delegating is wishful: a plugin author who forgets
+  `timeout=` on a `requests.post` hangs the backup indefinitely, and the whole point is that
+  a notifier cannot affect the backup. A timed-out send is logged and abandoned like any
+  other failure. The backup's exit code reflects the backup, never the telemetry about it.
 - Guarded by a `threading.Lock`, because the watchdog (§8) dispatches from a timer thread
   while the main thread may be dispatching a terminal event. Without the lock you get
   interleaved stderr and re-entrant notifier state.
 
-## 7. Redaction is mandatory and lives in the Event factory
+## 7. The contract: allowlisted fields, versioned
+
+### 7.1 Events carry an allowlist, not a filtered dump
 
 `prepare_for_restic` pushes `RESTIC_PASSWORD`, `AWS_SECRET_ACCESS_KEY`,
-`AZURE_ACCOUNT_KEY` and friends into `os.environ`
-(`repositories/s3.py:38-42`, and every other repository). Several `uri` implementations
-can embed credentials — `sftp.py` builds a host string, `swift.py`/`b2.py` similar.
+`AZURE_ACCOUNT_KEY` and friends into `os.environ` (`repositories/s3.py:38-42`, and every
+other repository). Several `uri` implementations embed credentials — `sftp.py` builds a
+host string, `swift.py`/`b2.py` similar.
 
-A notifier that does `f"backup of {event.repo_uri} failed"` and POSTs it to Discord
-publishes secrets to a third party. This cannot be left to plugin authors.
+The naive design assembles a rich event and then subtracts secrets. That fails **open**:
+every field added later leaks by default until someone remembers to scrub it, and the
+person adding the field is the least likely to be thinking about scrubbing.
 
-**Design:** `Event` is only constructible through a factory that scrubs by *value*. Collect
-the set of known-secret values (every env var whose key matches
-`PASSWORD|SECRET|KEY|TOKEN|CREDENTIAL`, plus every `<REPO>_PASSWORD` from `.env`) and
-replace each occurrence in every string field and in `extra` with `***`. Value-based
-scrubbing, not key-based, because the leak path is a secret *interpolated into a URI*, where
-the key name is long gone.
+**Inverted:** the event starts empty and gains only fields explicitly enumerated in §6. A
+field nobody added is simply not there. This fails **closed** — the failure mode of
+forgetting is a missing field in someone's Discord message, not a credential on the wire.
 
-Test requirement: a test that seeds a recognisable secret into `.env`, emits every event
-type, and asserts the literal never appears in any field of any dispatched event.
+Two consequences worth naming:
+
+- **`repo_uri` is gone.** It is the one genuinely useful-but-unsafe field: humans want to
+  know *which* repository failed, but the raw URI can carry credentials. Replaced by
+  `Repository.display_name()`, defaulting to `_short_name`, which a subclass may override
+  to something informative-but-safe (`"s3:acme-backups"`). Safe by construction: a plugin
+  that doesn't implement it discloses nothing.
+- **No `env` and no `os.environ` passthrough**, in any form, including inside `extra`.
+  `extra` is `Mapping[str, str]` and is populated only by emit sites in this package — it is
+  contract surface, not an escape hatch.
+
+**This is a guardrail, not a security boundary, and the docs must say so.** A notifier runs
+in-process; it can read `os.environ` and `.env` directly whenever it likes. No in-process
+Python sandbox changes that. The allowlist prevents *accidental* disclosure by a
+well-intentioned plugin — which is the failure that will actually happen — and nothing more.
+The honest framing for the README: **a notifier is trusted exactly like any other
+dependency**, and the thing to actually watch is where you point it.
+
+That warning belongs on `logs`, because free text is where the real exposure lives.
+Structured fields are enumerable and reviewable; `logs` is whatever restic decided to print,
+and restic prints repository URIs. Design decisions follow from that:
+
+- `logs` carries full stdout/stderr — truncating it defeats the purpose, since the
+  diagnostically useful part of a `check.failed` is exactly the detail.
+- It is populated only on failure events. A successful backup needs no log body.
+- The docs warn, once and prominently, that failure notifications may contain repository
+  paths and hostnames, so a channel carrying `logs` should be one you'd be comfortable
+  pasting a terminal session into. That is a routing decision, and `[restic.notify]`
+  per-channel `events` already expresses it.
+
+A value-based scrubber is *not* part of this design. It would mangle legitimate content and,
+worse, create false confidence in a mechanism that cannot be complete. What survives is a
+**test tripwire**: seed a recognisable secret into `.env`, emit every event type, assert the
+literal appears in no dispatched field. If the allowlist is right it never fires; if someone
+adds a careless field, CI catches it. That is the correct home for blocklist logic — an
+assertion, not a runtime filter.
+
+### 7.2 One integer, checked at discovery
+
+```python
+CONTRACT_VERSION = 1     # edwh_restic_plugin.plugins
+```
+
+A notifier declares `contract = 1`. On mismatch the dispatcher **warns and skips at
+discovery time** — not mid-backup, and never by raising. The failure this actually catches
+is the realistic one: a plugin pinned in some project's venv, still installed, after the
+`Event` shape moved on. `AttributeError` at 04:00 inside a cron job is a bad way to learn
+that; a line at startup saying "built for contract 1, this is 2, skipping" is a good one.
+
+Supporting pieces, all cheap:
+
+- Ship **`py.typed`** (the package has none today) so plugin authors get real type checking
+  across the boundary.
+- `Event`, `Notifier` and `Repository` are importable from **one stable module path**
+  (`edwh_restic_plugin.plugins`), so plugins never reach into `.repositories` internals.
+- `TypedDict` for structured payloads where useful, matching the existing `restictypes.py`
+  idiom rather than inventing a second convention.
+- The dispatcher **duck-types** `send` rather than requiring `isinstance`, so a notifier
+  package can type against the ABC without a hard runtime import of it.
+
+Bumping `CONTRACT_VERSION` is for changes that break a consumer: a removed or renamed field,
+a changed `send` signature. Adding an event name does not bump it — which means a `*`
+subscriber will receive names it has never heard of, and tolerating that is a documented
+obligation of implementing `send`.
 
 ## 8. Watchdog: detecting hanging backups
 
@@ -355,18 +445,89 @@ events = ["backup.failed", "check.failed", "wipe.*"]   # humans get only the bad
 modules = ["mycorp.restic_notifiers"]
 ```
 
+`channels` is also the activation list (§5): a notifier not named here does not run.
+
 Resolution order for a notifier: `.toml` per-channel `events` → `[restic.notify]`
-`min_level` → the notifier's own `subscribes` default. `wipe.*` ignores `min_level`.
+`min_level` → the notifier's own `subscribes` default.
+
+**No event bypasses filtering.** An earlier draft exempted `wipe.*`, and considered exempting
+`restore.failed`, on the grounds that unrecoverable-data events are too important to
+misconfigure away. Rejected: predictable semantics are worth more than a hardcoded exception,
+and an event that ignores the config it appears to obey is its own bug report. The
+justification is easier than it first looks — both `wipe` and `restore` are *user-initiated
+and interactive*, so the operator is already watching a terminal. The events that need to
+reach you when nobody is looking are the cron'd ones (`backup.*`, `check.*`), and those are
+filterable by the same rules as everything else.
+
+### 9.1 `default.toml` → `.toml`: warn, don't write
+
+`.toml` is gitignored (`.gitignore`'s `.*`); `default.toml` is committed. The intent is a
+tracked template copied once into a per-project file that is then **frozen** — deliberately
+so, because a project's tuned retention policy must not silently change when the template
+does.
+
+The current `get_or_copy_policy` implements the freeze by writing the template into `.toml`
+on first read. That works, but the write is invisible and its shape is surprising: since
+`determine_forget_policy` (`repositories/__init__.py:359`) tries `_short_name` first, the
+first `inv restic.forget` against an S3 repository writes `[restic.forget.s3] = <the default
+values>`. `.toml` then asserts that s3 is customised when it merely holds defaults — and a
+user who later hand-edits `[restic.forget.default]` is silently overridden by that
+auto-written block.
+
+Warning instead of writing preserves the freeze and removes the surprise:
+
+> `.toml` has no `[restic.notify]`, but `default.toml` does. Copy the block to adopt the
+> default, or add an empty `[restic.notify]` to keep current behaviour and silence this.
+
+The key missing → warn → use `default.toml`'s value *for this run only*, write nothing. The
+freeze becomes an explicit user act rather than a side effect of whichever task happened to
+run first, and the two escape hatches are exactly the two intents: an empty block means "I
+know, leave it", a copied block means "adopt and freeze".
+
+Applies to `[restic.notify]`, and worth backporting to `[restic.forget]` — same file, same
+confusion, and it makes the two sections behave identically.
+
+**Independent of that**, one defect in `get_or_copy_policy` is worth fixing while nearby:
+its third branch is dead code. It runs only when `from_toml_file(subkey, default_toml_path)`
+returns `None`, which requires `default.toml` to have neither `[subkey]` nor `[default]` — in
+which case `from_toml_file("default", default_toml_path)` returns `None` too, because
+`from_toml_file` already falls back to `[default]` internally
+(`section := forget.get(subkey) or forget.get("default")`). Unreachable on every path.
 
 ## 10. Decisions taken
 
 | Question | Decision |
 |---|---|
 | Config location | Hybrid — secrets in `.env`, routing/policy in `.toml`. |
+| `default.toml` → `.toml` | Copy-once-then-frozen semantics kept. Warn on a missing key instead of writing one (§9.1). |
 | Built-in notifiers | **None.** Core ships the interface only; ntfy/Discord/webhook/heartbeat are external packages (`edwh-restic-ntfy`, …). Core gains no HTTP dependency. |
-| Notifier failure | Always swallowed. A backup never fails because a channel is down. |
+| Extension mechanism | A single tier: the Python entry-point API. No URL-library delegation, no executable-hook tier, no subprocess isolation. |
+| Trust model | Documented, not enforced. A notifier is trusted like any dependency; the docs warn about log destinations (§7.1). |
+| Event fields | Allowlist. No `repo_uri`, no env passthrough. Full stdout/stderr permitted in `logs` on failures. |
+| Notifier activation | Explicit — named in `[restic.notify] channels`. Unlike repositories, not env-presence. |
+| Notifier failure | Caught, logged, timed out by the dispatcher, never fatal. A backup never fails because a channel is down. |
+| Event filtering | Uniform. No event bypasses `min_level` or per-channel `events`. |
+| Contract versioning | `CONTRACT_VERSION` integer; warn-and-skip on mismatch at discovery. Plus `py.typed`. |
+| Multiple repos per run | Out of scope, nothing reserved in the schema. One repository per invocation, as `cli_repo` does today. |
 | v1 scope | Repository entry-point discovery + narrowed abstract surface; event model + notifier registry + dispatch; watchdog for hanging backups. |
 | Deferred | Heartbeat/dead-man's-switch (external notifier, needs no core work beyond `backup.succeeded`), `inv restic.healthcheck` snapshot-age task, local single-file plugins, hard kill on timeout. |
+
+### Rejected, and why
+
+- **Delegating channels to a URL library (Apprise).** It would cover ~100 services with no
+  plugin code, and is what the nearest comparable project ([borgmatic](https://torsion.org/borgmatic/reference/configuration/monitoring/apprise/))
+  does. Rejected as incoherent with the registry: a plugin already has full in-process
+  access, so constraining the *channel* to a curated URL list restricts nothing an attacker
+  cares about while adding a dependency and a second configuration idiom. A proper Python
+  API is the better UX for the actual audience.
+- **Executable hooks (JSON on stdin, scrubbed env).** Real containment and language-agnostic,
+  but solves a problem this project does not have. `execute_files` already runs
+  `captain-hooks/*` with `prepare_env_for_restic` applied, so project-directory code seeing
+  credentials is an accepted boundary today.
+- **Runtime value-based secret scrubbing.** Mangles legitimate content and creates false
+  confidence in an incomplete mechanism. Retained only as a test tripwire (§7.1).
+- **A `run_id` for future fan-out.** Nothing to correlate while one invocation means one
+  repository; a receiving service can key on `(host, project, target, ts)`.
 
 ### Consequence of shipping zero built-in notifiers
 
@@ -389,24 +550,25 @@ Each step is independently shippable and leaves the tree green.
    `discover()`, and the `registrations.get()` fix (§2.2).
 3. **Narrow the abstract surface** (§2.3) — `UnsupportedOperation`, graceful degradation
    in `wipe`/`move`.
-4. **Event model + redaction** (§6, §7) — dataclass, factory, scrubber, and the
-   secret-leak test. No dispatch yet.
-5. **Notifier registry + `@emits` dispatch** (§5) — plus `MemoryNotifier` in tests.
+4. **Event model + contract** (§6, §7) — the dataclass and its factory,
+   `Repository.display_name()`, `CONTRACT_VERSION`, `py.typed`, and the secret-leak tripwire
+   test. No dispatch yet.
+5. **Notifier registry + `@emits` dispatch** (§5) — activation from `[restic.notify]
+   channels`, dispatcher-enforced timeout, contract check at discovery, plus `MemoryNotifier`
+   in tests.
 6. **Watchdog** (§8) — timer, escalation, per-target thresholds.
 7. **Reference external package** — `edwh-restic-ntfy` in a separate repository, which is
    also the real proof the contract is usable from outside.
 
-## 12. Open questions
+## 12. Known issues outside this design
 
-- **`.toml` file location.** `forget.py` defaults to `Path.cwd() / ".toml"` with a
-  `default.toml` fallback and a copy-on-read side effect (`get_or_copy_policy`). Should
-  `[restic.notify]` inherit that same discovery-and-copy behaviour, or read plainly? The
-  copy-on-read is surprising for notification config, which has no per-project default
-  worth materialising.
-- **Multiple repositories, one backup.** `cli_repo` resolves exactly one repository per
-  invocation. Should `Event.repo` ever be a list, i.e. is fan-out to several targets in a
-  single run a foreseeable feature? If yes, decide now — it is in the event schema.
-- **`restore` volume destruction.** `tasks.py:143-159` stops pg containers and removes
-  volumes *before* calling `restore`. If the restore then fails, the data is already gone.
-  Should `restore.failed` be forced to `level = "error"` and bypass `min_level` the way
-  `wipe.*` does?
+Both are pre-existing and independent of the plugin work; recorded here because they were
+found while mapping the code, not proposed as part of it.
+
+- **`restore` destroys before it verifies.** `tasks.py:143-159` stops the pg containers and
+  removes their volumes *before* calling `restore`. If the restore then fails — bad snapshot
+  id, unreachable repository, wrong password — the old data is already gone and the failure
+  notification arrives too late to matter. Notification cannot fix this; the ordering can.
+  Verifying the snapshot exists and is readable before destroying anything is a separate,
+  small change, and worth filing on its own.
+- **`get_or_copy_policy` third branch is unreachable.** See §9.1 for the derivation.
