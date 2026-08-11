@@ -237,7 +237,7 @@ from typing import Any, Mapping, Self
 
 import httpx
 from edwh_restic_plugin.plugins import (
-    CONTRACT_VERSION, BackupFailed, CheckFailed, Event, Notifier, register_notifier,
+    CONTRACT_VERSION, BackupEvent, CheckEvent, Event, Failed, Notifier, register_notifier,
 )
 
 
@@ -259,9 +259,9 @@ class MyWebhook(Notifier):
 
     def format(self, event: Event) -> str:
         match event:
-            case BackupFailed(exit_code=code, logs=logs):
+            case BackupEvent(status=Failed(exit_code=code, logs=logs)):
                 return f"{event.repo_display} backup failed (exit {code})\n{logs or ''}"
-            case CheckFailed():
+            case CheckEvent(status=Failed()):
                 return f"REPOSITORY DAMAGED: {event.repo_display}"
             case _:
                 return super().format(event)          # sensible default for the rest
@@ -304,276 +304,296 @@ dispatch semantics — core enforces it), no exception handling (core catches).
 
 ## 6. Event model
 
-A **tagged union of frozen dataclasses**, discriminated on `name`. Not one wide dataclass
-with a `str` name and an untyped `extra` bag: that pushes every "is this field set for this
-event?" question to runtime, which is exactly the question a plugin author needs answered
-while writing.
+Two axes carry real information, and picking only one makes the other's fields optional lies:
+
+- **Operation** determines `target`, `snapshot`, `message`, `policy`, `snapshots_removed`.
+- **Phase** determines `duration`, `exit_code`, `logs`, `elapsed`, `threshold`.
+
+So compose them. One frozen dataclass per **operation**, carrying a `status` that is a small
+union of **phase** objects. Phases are universal across operations, so there is nothing to map
+between the two axes.
 
 ```python
 Level = Literal["info", "warning", "error"]
 
+# --- phase axis: shared by every operation ---
+
 @dataclass(frozen=True, kw_only=True)
-class EventBase:
+class Started:
+    phase: Literal["started"] = "started"
+
+@dataclass(frozen=True, kw_only=True)
+class Succeeded:
+    phase: Literal["succeeded"] = "succeeded"
+    duration: float
+
+@dataclass(frozen=True, kw_only=True)
+class Failed:
+    phase: Literal["failed"] = "failed"
+    duration: float
+    exit_code: int
+    logs: str | None = None        # full stdout/stderr — §7.1
+
+@dataclass(frozen=True, kw_only=True)
+class Slow:
+    phase: Literal["slow"] = "slow"
+    elapsed: float                 # not `duration`: the operation has not finished
+    threshold: float               # which warn_after step tripped
+
+Status = Started | Succeeded | Failed | Slow
+
+# --- operation axis ---
+
+@dataclass(frozen=True, kw_only=True)
+class BasicEvent:
+    operation: ClassVar[str]       # "backup", set per subclass
+    status: Status
     ts: datetime
     level: Level
-    repo: str                     # short_name, e.g. "s3"
-    repo_display: str             # Repository.display_name() — §7.1, never the raw uri
-    host: str                     # RESTICHOSTNAME or platform hostname
-    project: str                  # cwd name, or [restic.notify] project
+    repo: str                      # short_name, e.g. "s3"
+    repo_display: str              # Repository.display_name() — §7.1, never the raw uri
+    host: str                      # RESTICHOSTNAME or platform hostname
+    project: str                   # cwd name, or [restic.notify] project
+
+    @property
+    def name(self) -> str:
+        return f"{self.operation}.{self.status.phase}"
 
 @dataclass(frozen=True, kw_only=True)
-class BackupStarted(EventBase):
-    name: Literal["backup.started"] = "backup.started"
-    target: str | None
-
-@dataclass(frozen=True, kw_only=True)
-class BackupSucceeded(EventBase):
-    name: Literal["backup.succeeded"] = "backup.succeeded"
-    target: str | None
-    duration: float
-    snapshot: str | None
-    message: str | None           # the snapshot message
-
-@dataclass(frozen=True, kw_only=True)
-class BackupFailed(EventBase):
-    name: Literal["backup.failed"] = "backup.failed"
-    target: str | None
-    duration: float
+class ScriptFailure:
+    script: str
     exit_code: int
-    logs: str | None              # full stdout/stderr — §7.1
 
 @dataclass(frozen=True, kw_only=True)
-class BackupScriptFailed(EventBase):
-    name: Literal["backup.script.failed"] = "backup.script.failed"
-    script: str                   # the captain-hooks file that failed
-    exit_code: int
-    logs: str | None
+class BackupEvent(BasicEvent):
+    operation: ClassVar[str] = "backup"
+    target: str | None = None
+    snapshot: str | None = None
+    message: str | None = None
+    scripts: tuple[ScriptFailure, ...] = ()    # captain-hooks that failed, if any
 
 @dataclass(frozen=True, kw_only=True)
-class BackupSlow(EventBase):
-    name: Literal["backup.slow"] = "backup.slow"
-    target: str | None
-    elapsed: float                # not `duration`: the backup has not finished
-    threshold: float              # which warn_after step tripped
-    script: str | None            # currently-running script, if known
+class RestoreEvent(BasicEvent):
+    operation: ClassVar[str] = "restore"
+    target: str | None = None
+    snapshot: str | None = None
+    scripts: tuple[ScriptFailure, ...] = ()
 
-# ... restore.*, check.*, forget.*, wipe.* likewise
+@dataclass(frozen=True, kw_only=True)
+class CheckEvent(BasicEvent):
+    operation: ClassVar[str] = "check"
+    read_data: bool = False
+    subset: str = ""
 
-Event = (
-    BackupStarted | BackupSucceeded | BackupFailed | BackupScriptFailed | BackupSlow
-    | RestoreStarted | RestoreSucceeded | RestoreFailed
-    | CheckSucceeded | CheckFailed
-    | ForgetSucceeded | ForgetFailed
-    | WipeStarted | WipeSucceeded
-)
+@dataclass(frozen=True, kw_only=True)
+class ForgetEvent(BasicEvent):
+    operation: ClassVar[str] = "forget"
+    policy: str | None = None
+    snapshots_removed: int | None = None
+
+@dataclass(frozen=True, kw_only=True)
+class WipeEvent(BasicEvent):
+    operation: ClassVar[str] = "wipe"
+
+Event = BackupEvent | RestoreEvent | CheckEvent | ForgetEvent | WipeEvent
 ```
 
-There is deliberately **no flat `EventName = Literal[...]` alias.** Each variant already pins
-its own name, so a second list is a second thing to forget to update, and it would buy
-nothing: config `events` entries are patterns (`backup.*`), not names, so they cannot be typed
-by it anyway.
+Nine classes rather than the fourteen an earlier draft proposed, and **adding an operation costs
+one class, not four**. `name` is derived, so `.toml` patterns like `backup.failed` and
+`subscribes = ("check.*",)` keep working with no flat list of names to maintain anywhere.
 
-Three things this buys that the wide-dataclass version could not:
+`level` stays a field rather than being derived from the phase, because `wipe.succeeded` is a
+`warning` while `backup.succeeded` is `info` — the mapping is not one-to-one.
 
-- **`exit_code` is `int`, not `int | None`.** It exists on failure events and nowhere else,
-  so the type states that instead of documenting it. Same for `duration`, `snapshot`,
-  `script`.
-- **`extra` is gone.** Event-specific data has a declared home — `BackupSlow.threshold`,
-  `BackupScriptFailed.script` — rather than a `Mapping[str, str]` that every emit site
-  populates by convention and every consumer reads by guesswork.
-- **`BackupSlow.elapsed` is not `duration`.** The wide version forced both concepts through
-  one field, quietly meaning "final runtime" on some events and "so far" on others. Splitting
-  the classes made the naming bug visible.
+### There is no separate script-failure event
 
-### Keeping name, class, union and emit site in sync
+An earlier draft had `backup.script.failed` as its own class, emitted per failing
+`captain-hooks` script. Dropped, for a reason that is about cardinality rather than typing:
+`execute_files` runs N scripts, so per-script events mean a notifier receives N+1 events for one
+backup — four Discord messages for one failed nightly job.
 
-The class definitions are the single source of truth. Everything else is derived or
-CI-enforced, because there are four places the same fact could drift apart: the `Literal` on
-the class, the `Event` union alias, the runtime lookup table, and whether anything ever
-actually constructs the variant.
+The failures are instead collected onto the terminal event, as `scripts`. One `backup.failed`
+can then say *"3 of 5 scripts failed: backup_files_pg.sh(2), backup_stream_db.sh(1)"*. Empty
+tuple rather than `None`, so the field is honest at every phase. Only `backup` and `restore`
+carry it, since they are the operations that run `captain-hooks` through `execute_files`.
 
-**Registered at definition, via `__init_subclass__`.** Registration happens as each class is
-created, so there is no traversal to get wrong and nesting depth is irrelevant:
+What this gives up: a notification the instant an individual script fails. That is not worth
+having — `execute_files` runs sequentially inside one cron job, so nobody is watching between
+scripts.
+
+### Reading an event
+
+Both `ty` and `mypy` narrow a `Literal` discriminant through attribute access, in **both**
+branches. No accessor helper, no overloads, no `cast`:
+
+```python
+if event.status.phase == "failed":
+    event.status.exit_code          # -> Failed
+else:
+    event.status                    # -> Started | Succeeded | Slow
+```
+
+`match` narrows through both axes at once, which is the idiom worth documenting:
+
+```python
+match event:
+    case BackupEvent(status=Failed(exit_code=code, logs=logs), target=target): ...
+    case ForgetEvent(status=Succeeded(), snapshots_removed=n): ...
+    case BasicEvent(status=Slow(elapsed=secs)): ...     # any operation running long
+```
+
+That last arm is the payoff of putting phase on its own axis: "anything is running long" and
+"anything failed" become one arm each, instead of one per operation.
+
+### Exhaustiveness
+
+`assert_never` still works, now over five operations instead of fourteen names:
+
+```python
+match event:
+    case BackupEvent() | RestoreEvent(): ...
+    case CheckEvent() | ForgetEvent() | WipeEvent(): ...
+    case _:
+        assert_never(event)   # mypy errors here if an operation is unhandled
+```
+
+**Opt-in, and it interacts with versioning (§7.2).** Adding an operation widens the union
+without changing existing members, so a notifier keeps *running* unchanged — but one ending in
+`assert_never` will *fail type-checking* until it adds an arm. Authors should choose knowingly:
+
+| Final arm | New operation at runtime | New operation in CI |
+|---|---|---|
+| `case _: return` | ignored silently | passes |
+| `case _: self.generic(event)` | handled generically | passes |
+| `case _: assert_never(event)` | unreachable, so no effect | **fails, naming the missing member** |
+
+Notifiers wanting neither can ignore the union and use `BasicEvent` fields plus `event.name`,
+`event.level` and `event.status.phase` — which is what §5.1's `send` does.
+
+### Keeping the classes, the union and the emit sites in sync
+
+Operations self-register at class creation, so there is no traversal and no second list:
 
 ```python
 @dataclass(frozen=True, kw_only=True)
-class EventBase:
-    variants: ClassVar[dict[str, type["EventBase"]]] = {}
-
-    ts: datetime
-    level: Level
-    # ... common fields per §6
+class BasicEvent:
+    operations: ClassVar[dict[str, type["BasicEvent"]]] = {}
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         super().__init_subclass__(**kwargs)
-        if "name" not in cls.__dict__:
-            return                       # intermediate base, or a subclass reusing a name
-        if (declared := get_args(cls.__annotations__["name"])) != (cls.name,):
-            raise TypeError(f"{cls.__name__}: annotation {declared} != default {cls.name!r}")
-        if clash := EventBase.variants.get(cls.name):
-            raise TypeError(f"{cls.__name__} reuses {cls.name!r} from {clash.__name__}")
-        EventBase.variants[cls.name] = cls
+        if "operation" not in cls.__dict__:
+            return                       # intermediate base, or a subclass reusing one
+        if clash := BasicEvent.operations.get(cls.operation):
+            raise TypeError(f"{cls.__name__} reuses {cls.operation!r} from {clash.__name__}")
+        BasicEvent.operations[cls.operation] = cls
 ```
 
-Two ordering facts make this work, both worth a comment in the source because they are easy to
-break:
+One ordering fact worth a comment in the source, because it is easy to break:
+`__init_subclass__` runs **before** `@dataclass` is applied to the subclass, and
+`dataclasses.fields(cls)` does *not* raise there — `__dataclass_fields__` is inherited, so it
+silently returns only the base's fields. Registration must therefore read only `__dict__`.
+Since `operation` is a `ClassVar` set in the class body, that is all it needs.
 
-- **`__init_subclass__` runs before `@dataclass` is applied to the subclass.** `cls.name` and
-  `cls.__annotations__` come from the class body, so both are already populated — but
-  `dataclasses.fields(cls)` does *not* raise here, which is the trap. `__dataclass_fields__` is
-  inherited, so it silently returns only the **base's** fields: `['ts']`, not
-  `['ts', 'name', 'exit_code']`. Registration must therefore depend only on `__dict__` and
-  `__annotations__`, and any future field-level validation belongs in a test or a
-  `__post_init__`, not here.
-- **This module must not use `from __future__ import annotations`.** With postponed
-  evaluation, `cls.__annotations__["name"]` is the *string* `'Literal["backup.failed"]'` and
-  `get_args` returns `()`. Nothing else in `src/` uses it today, and 3.12 leaves it opt-in, so
-  this is a constraint to document rather than defend against.
+Guarding on `"operation" in cls.__dict__` rather than `hasattr` is what lets intermediate bases
+and plugin subclasses exist without re-registering an inherited value. Duplicate operations
+become an **import-time error** rather than a test failure, which is where a definition-time
+property belongs.
 
-Guarding on `"name" in cls.__dict__` rather than `hasattr` is what lets intermediate bases and
-plugin subclasses exist: a class that does not declare its own name is not a new variant, and
-is correctly ignored instead of re-registering an inherited one.
-
-**Two invariants become import-time errors** rather than test failures — a name annotation
-disagreeing with its own default, and two variants sharing a name. Both are definition-time
-properties, so they should fail when you write the class, not when someone runs pytest.
-
-**What still needs a test.** Only what the hook structurally cannot see:
+**What still needs a test** — only what the hook structurally cannot see:
 
 ```python
 def test_union_matches_the_classes():
     """Orphan class, or junk in the union."""
-    static, runtime = set(typing.get_args(Event)), set(EventBase.variants.values())
+    static, runtime = set(typing.get_args(Event)), set(BasicEvent.operations.values())
     assert static == runtime, {
         "defined but missing from Event": runtime - static,
-        "in Event but not an event class": static - runtime,
+        "in Event but not an operation": static - runtime,
     }
 
-def test_every_variant_is_actually_emitted(names_seen_this_session):
-    """A variant nobody constructs is dead weight that still ships in the contract."""
-    assert set(EventBase.variants) - names_seen_this_session == set()
+def test_every_operation_and_phase_is_emitted(pairs_seen_this_session):
+    """An (operation, phase) nobody constructs is dead weight that still ships."""
+    expected = {(op, ph) for op in BasicEvent.operations
+                         for ph in phases_of(op)}      # wipe has no `failed`
+    assert expected - pairs_seen_this_session == set()
 ```
 
-The first is unavoidable: `Event` must be a statically written alias because no type checker can
+The first is irreducible: `Event` must be a statically written alias because no type checker can
 follow a computed union, so something has to assert the hand-written half matches the registry.
 
-The second closes the gap none of the above can see. A variant can be defined, registered, and
-present in the union, yet never constructed by any emit site — the taxonomy table then promises
-an event that never fires. `MemoryNotifier` (§10) is already the test-suite consumer subscribing
-to `*`, so collecting `event.name` into a session-scoped fixture makes emit-site coverage a set
-difference. It is also what keeps `@emits` honest: a typo there yields a silently-never-emitted
-variant rather than an error.
-
-### Exhaustiveness
-
-`match` narrows on class patterns, and `assert_never` turns a missing arm into a type error:
-
-```python
-def send(self, event: Event) -> None:
-    match event:
-        case BackupFailed() | CheckFailed() | RestoreFailed() | ForgetFailed():
-            self.page_someone(event)
-        case BackupSlow(elapsed=secs):
-            self.warn(f"still running after {secs / 60:.0f}m")
-        case _:
-            assert_never(event)   # mypy errors here if a variant is unhandled
-```
-
-**This is opt-in, and it interacts with versioning (§7.2).** Adding an event name is a minor
-bump — it widens the union without changing existing variants, so a notifier keeps *running*
-unchanged. But a notifier that ends in `assert_never` will *fail type-checking* against the
-new version until it adds an arm. That is the intended trade and authors should choose
-knowingly:
-
-| Final arm | On a new event at runtime | On a new event in CI |
-|---|---|---|
-| `case _: return` | ignored silently | passes |
-| `case _: self.generic(event)` | handled generically | passes |
-| `case _: assert_never(event)` | unreachable, so no effect | **fails, with the missing variant named** |
-
-Notifiers wanting neither can ignore the union entirely and use only `EventBase` fields plus
-`event.name` and `event.level` — which is what §5.1's `send` does.
+The second covers the gap the hook cannot: a class can be defined, registered and present in the
+union, yet some phase of it never constructed — the taxonomy below then promises an event that
+never fires. `MemoryNotifier` (§10) already subscribes to `*` as the test-suite consumer, so
+collecting `(operation, phase)` pairs into a session-scoped fixture makes coverage a set
+difference. Note it is now pairs, not names: with phase on its own axis, `check` existing does
+not prove `check.failed` ever fires.
 
 ### Taxonomy
 
 | Event | Level | Notes |
 |---|---|---|
 | `backup.started` | info | Arms the watchdog (§8). |
-| `backup.script.failed` | error | Per `captain-hooks` script, with its real exit code. Requires §2.4. |
-| `backup.succeeded` | info | Carries snapshot ids. Heartbeat notifiers subscribe here. |
-| `backup.failed` | error | Requires §2.4. |
+| `backup.succeeded` | info | Carries snapshot id. Heartbeat notifiers subscribe here. |
+| `backup.failed` | error | Carries `scripts` for any failed `captain-hooks`. Requires §2.4. |
 | `backup.slow` | warning | Watchdog; see §8. |
 | `restore.started` / `.succeeded` / `.failed` | info/info/error | `restore` also destroys pg volumes (`tasks.py`), so failure here is high-severity in practice. |
-| `check.succeeded` / `check.failed` | info/error | **The most valuable pair.** Silent repository corruption is the failure mode you otherwise discover during a restore. |
-| `forget.succeeded` / `.failed` | info/error | Include snapshots removed; a policy that suddenly prunes 400 snapshots is a signal. |
+| `check.succeeded` / `check.failed` | info/error | **The most valuable pair.** Silent repository corruption is the failure mode you otherwise discover during a restore. Needs a task first — see below. |
+| `forget.succeeded` / `.failed` | info/error | Carries `snapshots_removed`; a policy that suddenly prunes 400 snapshots is a signal. |
 | `wipe.started` / `.succeeded` | warning/warning | Destructive and irreversible, but user-initiated. Filterable like everything else. |
 
-`configure` and `snapshots` emit nothing; they are interactive and read-only.
+`restore.slow` and `check.slow` come free from the watchdog arming on any `Started`, at no extra
+schema cost — which is the second dividend of the phase axis.
 
+`configure` and `snapshots` emit nothing; they are interactive and read-only.
 ### Where events are emitted
 
 At the **task layer** (`tasks.py`), not inside `Repository` — because `Repository` subclasses
 are written by *plugin authors*, who must not have to remember to emit anything. Tasks are also
 the operation boundary a human cares about.
 
-**The obstacle.** A plain `@emits("backup")` above `@task` cannot work, because every task
-resolves its repository *inside* its own body — `repo = cli_repo(connection_choice)` in `backup`,
-and `cli_repo(connection_choice).restore(...)` inline in `restore`. A wrapper never sees the
-`Repository` instance, so it cannot fill `repo` or `repo_display`. Nor may it resolve one itself:
-`cli_repo` prints `Use connection: …` and calls `repo.setup()` → `check_env`, which *prompts
-interactively* on a missing variable. Resolving twice would print twice and prompt twice.
-
-**The fix: the decorator resolves the repository and injects it.** `Repository` resolution is
-already duplicated across eight task bodies; folding it into the same decorator that emits
-events removes that duplication instead of adding a line to each:
+**A context manager that yields the repository**, not a decorator:
 
 ```python
-def with_repo(family: str, *, choice_arg: str = "connection_choice"):
-    def deco(fn):
-        sig = inspect.signature(fn)
-        public = [p for n, p in sig.parameters.items() if n != "repo"]
-
-        @functools.wraps(fn)
-        def wrapper(c, *args, **kwargs):
-            repo = cli_repo(kwargs.get(choice_arg))          # resolved exactly once
-            with emit(family, repo, **relevant(kwargs)):     # started / succeeded / failed
-                return fn(c, repo, *args, **kwargs)
-
-        wrapper.__signature__ = sig.replace(parameters=public)   # hide `repo` from the CLI
-        return wrapper
-    return deco
-
-@task
-@with_repo("backup")
-def backup(c, repo, target: str = "", connection_choice: str = None, ...):
+with repo_context(connection_choice, BackupEvent) as repo:
     repo.backup(c, verbose, target, message)
 ```
 
-The `__signature__` assignment is the load-bearing line and it is **verified against this
-codebase's actual decorator**, not assumed: `edwh.task` is `ewok.core.task`, `ewok.Task`
-subclasses `invoke.tasks.Task` and inherits `argspec` unchanged, and that method calls
-`inspect.signature()` — which honours an explicit `__signature__`. With it, `ewok` exposes
-exactly `target`, `connection_choice`, `verbose` on the CLI and `repo` stays invisible;
-`functools.wraps` alone would have leaked a spurious `--repo` flag.
+`__enter__` resolves via `cli_repo`, emits `Started`, and arms the watchdog. `__exit__` cancels
+the watchdog and emits `Succeeded` or `Failed` — phase chosen from the exception or its absence,
+`duration` from the elapsed time, `exit_code` from the exception. One construct covers
+resolution, all four phases, and timing.
 
-Two wrinkles, both cheap:
+Why not a decorator: every task resolves its repository *inside* its own body — `repo =
+cli_repo(connection_choice)` in `backup`, `cli_repo(connection_choice).restore(...)` inline in
+`restore` — so a wrapper never sees the `Repository` and cannot fill `repo`/`repo_display`. It
+could resolve one itself, but `cli_repo` prints `Use connection: …` and calls `repo.setup()` →
+`check_env`, which *prompts interactively* on a missing variable, so resolving twice would print
+twice and prompt twice. Injecting `repo` as a hidden parameter works (`__signature__` on the
+wrapper keeps it off the CLI, verified against `ewok.Task.argspec`) but changes task signatures
+and invoke semantics to buy nothing the context manager does not already give.
 
+The second argument is the **operation class**, which is all the manager needs: phases are
+universal (§6), so there is no family mapping, no name string, and no registry lookup —
+`BackupEvent` plus a `Status` is a complete event.
+
+**Two details this settles:**
+
+- **Resolution failures are inside the block.** `cli_repo` raising `ValueError` on an invalid
+  `--connection-choice` now happens after `__enter__` is entered, so it *can* be reported — but
+  there is no `Repository` yet, so `repo_display` falls back to the raw choice string. Worth it:
+  a mistyped connection name in a cron job is exactly the silent failure this feature exists to
+  catch.
 - **The choice argument is inconsistently named.** `backup`, `restore`, `snapshots`, `run` and
   `env` call it `connection_choice`; `forget`, `unlock`, `du` and `wipe` call it `connection`.
-  Hence `choice_arg`. Worth considering a follow-up that accepts both names everywhere, since
-  `edwh restic.backup --connection-choice s3` beside `edwh restic.forget --connection s3` is a
-  wart the README already documents.
-- **`move` takes two repositories** (`source` and `target`). It stays hand-written; a decorator
-  built for the single-repository case should not be generalised for one caller.
+  The context manager takes the value rather than the name, so unlike the decorator it does not
+  care — but `edwh restic.backup --connection-choice s3` beside `edwh restic.forget --connection
+  s3` remains a wart the README documents, worth a separate follow-up.
 
-Known consequence either way: a failure *before* resolution succeeds — an invalid
-`--connection-choice` raising `ValueError`, or an abandoned `check_env` prompt — emits nothing.
-Acceptable: no operation had begun, and both are synchronous and interactive, so the operator
-sees the traceback. It would not be acceptable under cron, which is what the watchdog and an
-external heartbeat (§8) are for.
+`move` takes two repositories (`source` and `target`) and stays hand-written; nesting two
+`repo_context` blocks would emit two operations for one user action.
 
-Fine-grained `backup.script.failed` is emitted from `execute_files`
-(`repositories/__init__.py`), the only place per-script exit codes exist.
+Failed `captain-hooks` scripts are collected in `execute_files`
+(`repositories/__init__.py`) — the only place per-script exit codes exist — and attached to the
+terminal event as `scripts` rather than emitted separately (§6).
 
 ### `check` needs a task before it can emit
 
@@ -588,11 +608,11 @@ exists to serve, where it means paying full egress on every run.
 
 ```python
 @task(aliases=("verify",))
-@with_repo("check", choice_arg="connection")
-def check(c, repo, connection: str = None, read_data: bool = False, subset: str = ""):
+def check(c, connection: str = None, read_data: bool = False, subset: str = ""):
     """Verify repository integrity. Structure only by default; --read-data reads everything,
     --subset=5% or --subset=1G reads a sample (restic picks a different one each run)."""
-    repo.check(c, read_data=read_data, subset=subset)
+    with repo_context(connection, CheckEvent) as repo:
+        repo.check(c, read_data=read_data, subset=subset)
 ```
 
 Defaulting to structure-only makes the cheap check the one you get by accident, and
@@ -638,7 +658,7 @@ Two consequences worth naming:
   to something informative-but-safe (`"s3:acme-backups"`). Safe by construction: a plugin
   that doesn't implement it discloses nothing.
 - **No `env` and no `os.environ` passthrough**, in any form. There is also no free-form
-  `extra` mapping to smuggle one through — §6's tagged union means every field on every event
+  `extra` mapping to smuggle one through — §6's typed operation/phase classes mean every field
   is declared, so the allowlist is enforced by the type, not by a convention about what emit
   sites are supposed to put in a dict.
 
@@ -692,7 +712,7 @@ Supporting pieces, all cheap:
 
 Bumping `CONTRACT_VERSION` is for changes that break a consumer at *runtime*: a removed or
 renamed field, a changed `send` signature, a variant dropped from the union. Adding an event
-name does **not** bump it — the union widens, existing variants are untouched, and a `*`
+name does **not** bump it — the union widens, existing members are untouched, and a `*`
 subscriber keeps working. It will however receive names it has never heard of, so tolerating
 that is a documented obligation of implementing `send`, and it is the one case where a
 type-check can fail while the runtime contract holds (§6, Exhaustiveness).
@@ -830,8 +850,8 @@ which case `from_toml_file("default", default_toml_path)` returns `None` too, be
 | Extension mechanism | A single tier: the Python entry-point API. No URL-library delegation, no executable-hook tier, no subprocess isolation. |
 | Trust model | Documented, not enforced. A notifier is trusted like any dependency; the docs warn about log destinations (§7.1). |
 | Event fields | Allowlist. No `repo_uri`, no env passthrough. Full stdout/stderr permitted in `logs` on failures. |
-| Event schema | Tagged union of frozen dataclasses discriminated on a `Literal` `name`; no free-form `extra`. Exhaustive matching via `assert_never` is available and opt-in. |
-| Name/class sync | Class definitions are the source of truth. No flat `EventName` alias; variants self-register in `__init_subclass__`, which makes annotation/default disagreement and duplicate names import-time errors. Two tests cover the rest: the static `Event` union, and emit-site coverage. |
+| Event schema | One frozen dataclass per **operation**, carrying a `status` union of **phase** objects. Two axes composed rather than one chosen, so neither's fields become optional. No free-form `extra`, no separate script-failure event. Exhaustive matching via `assert_never` is available and opt-in. |
+| Name/class sync | Class definitions are the source of truth. `name` is derived from `operation` + `status.phase`, so no flat name list exists; operations self-register in `__init_subclass__`, making duplicates an import-time error. Two tests cover the rest: the static `Event` union, and (operation, phase) emit coverage. |
 | Plugin config access | Core resolves everything and passes `env` (parsed `.env`) plus `options` (resolved `[restic.notify.<name>]`) to `from_config`. Plugins never open `.toml`. |
 | Notifier activation | Explicit — named in `[restic.notify] channels`. Unlike repositories, not env-presence. |
 | Notifier failure | Caught, logged, timed out by the dispatcher, never fatal. A backup never fails because a channel is down. |
@@ -905,7 +925,8 @@ Each step is independently shippable and leaves the tree green. Baseline at time
    `discover()`, and the `registrations.get()` fix (§2.2).
 3. **Narrow the abstract surface** (§2.3) — `UnsupportedOperation`, graceful degradation
    in `wipe`/`move`.
-4. **Event model + contract** (§6, §7) — the variants and their `__init_subclass__` registry,
+4. **Event model + contract** (§6, §7) — the operation classes, the `Status` union, the
+   `__init_subclass__` registry,
    `Repository.display_name()`, `CONTRACT_VERSION`, `py.typed`, and the secret-leak tripwire
    test. No dispatch yet.
 5. **Notifier registry + emit sites** (§5) — the `emit_*` context managers, activation from
