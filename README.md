@@ -14,6 +14,10 @@
 - [Commands](#commands)
 - [Forget policy integration](#forget-policy-integration)
 - [Wipe (destructive)](#wipe-destructive)
+- [Integrity checks](#integrity-checks)
+- [Notifications](#notifications)
+- [Custom repository types](#custom-repository-types)
+- [Design notes](#design-notes)
 - [License](#license)
 
 ## Installation
@@ -297,6 +301,214 @@ Behavior:
 - S3-style backends share the generic wipe helper; other providers still implement their own config.
 
 Use this only when you intentionally want to remove a repository's backup contents.
+
+## Integrity checks
+
+`restic.check` verifies that the repository itself is intact. Silent corruption is otherwise the
+failure mode you discover during a restore, which makes this the most valuable thing to schedule.
+
+```console
+edwh restic.check --connection s3               # structure only, cheap
+edwh restic.check --connection s3 --subset 5%   # also read a 5% sample of the data
+edwh restic.check --connection s3 --read-data   # read every byte (slow, full egress)
+```
+
+Options:
+
+- `--connection` — repository to check; defaults to the one derived from `.env`.
+- `--read-data` — read and verify every pack file. Thorough, but re-downloads the whole
+  repository, so on a cloud backend it pays full egress every run.
+- `--subset` — read a sample instead: `5%`, `1G`, or `2/8`. Restic picks a different sample each
+  run, so a weekly `--subset 5%` converges on full coverage without ever paying for it at once.
+  Ignored when `--read-data` is set.
+
+## Notifications
+
+Backups run under cron, where a failure is silent unless something reports it. This plugin emits
+events for each operation and hands them to notifier plugins.
+
+Core ships **no** notifiers, only the interface — no HTTP dependency is added to this package. A
+notifier is a separate pip-installable package.
+
+### Configuring channels
+
+Secrets go in `.env`; routing goes in `.toml` next to `[restic.forget]`:
+
+```toml
+[restic.notify]
+project    = "acme-prod"          # defaults to the directory name
+channels   = ["ntfy", "discord"]  # nothing is active unless it is named here
+min_level  = "warning"            # global floor: info | warning | error
+warn_after = ["30m", "2h"]        # emit backup.slow at each
+
+[restic.notify.ntfy]
+events = ["*"]                    # ntfy gets everything
+
+[restic.notify.discord]
+events = ["backup.failed", "check.failed"]   # humans get only the bad news
+
+[restic.notify.targets.stream]
+warn_after = ["4h"]               # pg dumps are legitimately slow
+```
+
+**Activation is explicit.** A notifier runs only if `channels` names it, so installing a package
+sends nothing until you wire it up. If a channel is named but its credentials are not in `.env`
+yet, it is skipped with a note rather than treated as an error.
+
+`.toml` is gitignored and per-project; `default.toml` is the committed template. Once `.toml`
+exists it is frozen — if it lacks a section that `default.toml` has, you get a warning telling you
+to copy the block to adopt the defaults, or add an empty block to keep current behaviour and
+silence the warning. Reading config never rewrites it.
+
+### Events
+
+Event names are `<operation>.<phase>`. Operations are `backup`, `restore`, `check`, `forget` and
+`wipe`; phases are `started`, `succeeded`, `failed` and `slow`.
+
+| Event | Level | Notes |
+|---|---|---|
+| `backup.started` | info | Arms the hang watchdog. |
+| `backup.succeeded` | info | Carries the snapshot id. |
+| `backup.failed` | error | Carries any failed `captain-hooks` scripts and their exit codes. |
+| `backup.slow` | warning | Still running after `warn_after`. Does not kill anything. |
+| `check.failed` | error | The one you most want to reach a human. |
+| `forget.succeeded` | info | Carries the policy applied. |
+| `wipe.*` | warning | Destructive but user-initiated. |
+
+`restore.*`, `check.*` and `forget.*` follow the same shape. `configure` and `snapshots` emit
+nothing; they are interactive and read-only.
+
+Filtering is uniform: no event bypasses `min_level` or a channel's `events` list.
+
+### Writing a notifier
+
+One decorator, one classmethod, one `send`:
+
+```python
+from typing import Any, Mapping, Self
+
+import httpx
+from edwh_restic_plugin.plugins import (
+    CONTRACT_VERSION, BackupEvent, CheckEvent, Event, Failed, Notifier, register_notifier,
+)
+
+
+@register_notifier("mywebhook")
+class MyWebhook(Notifier):
+    contract = CONTRACT_VERSION
+
+    def __init__(self, url: str, secret: str) -> None:
+        self.url = url
+        self.secret = secret
+
+    @classmethod
+    def from_config(cls, env: Mapping[str, str], options: Mapping[str, Any]) -> Self | None:
+        url = options.get("webhook_url")              # from .toml
+        secret = env.get("PLUGIN_WEBHOOK_SECRET")     # from .env
+        if not (url and secret):
+            return None                               # named but unprovisioned -> inactive
+        return cls(url, secret)
+
+    def format(self, event: Event) -> str:
+        match event:
+            case BackupEvent(status=Failed(exit_code=code, logs=logs)):
+                return f"{event.repo_display} backup failed (exit {code})\n{logs or ''}"
+            case CheckEvent(status=Failed()):
+                return f"REPOSITORY DAMAGED: {event.repo_display}"
+            case _:
+                return super().format(event)
+
+    def send(self, event: Event) -> None:
+        httpx.post(
+            self.url,
+            headers={"X-Webhook-Secret": self.secret},
+            json={"event": event.name, "level": event.level, "text": self.format(event)},
+        )
+```
+
+Declare one entry point so it is discovered:
+
+```toml
+[project.entry-points."edwh_restic_plugin.notifiers"]
+mywebhook = "my_package"
+```
+
+You do not write config parsing, discovery, timeout handling or exception handling — core does all
+of it. `from_config` receives the parsed `.env` and the resolved `[restic.notify.<name>]` table, so
+a notifier never opens `.toml` itself.
+
+Notes:
+
+- **A notifier cannot break a backup.** Exceptions are caught and logged, each `send` has a
+  wall-clock timeout, and the process exit code reflects the backup rather than the telemetry
+  about it.
+- **`send` may receive event names it does not know.** Adding an operation is an additive change,
+  so a `*` subscriber must tolerate unknown names.
+- **`contract`** declares which `CONTRACT_VERSION` you built against. A mismatch is reported and
+  the notifier skipped at startup rather than failing mid-backup.
+- **Type checking works across the boundary** — the package ships `py.typed`, and every public
+  name is importable from `edwh_restic_plugin.plugins`.
+
+### Security note
+
+A notifier runs in-process and is trusted exactly like any other dependency. Events themselves are
+built from an allowlist of fields and never include the repository URI (several backends embed
+credentials in it) or the environment — but **`logs` on a failure event carries restic's full
+stdout/stderr**, which can include repository paths and hostnames. Point channels carrying failure
+events somewhere you would be comfortable pasting a terminal session.
+
+## Custom repository types
+
+Add a restic-supported backend this package does not ship, from your own package. Three members
+are required:
+
+```python
+from edwh_restic_plugin.repositories import Repository, register
+
+
+@register("azure", aliases=("az",), priority=20)
+class AzureRepository(Repository):
+    def setup(self) -> None:
+        self.check_env("AZURE_NAME", None, "Container to store backups in")
+        self.check_env("AZURE_PASSWORD", None, "Restic password")
+        self.check_env("AZURE_ACCOUNT_NAME", None, "Storage account name")
+        self.check_env("AZURE_ACCOUNT_KEY", None, "Storage account key")
+
+    def prepare_for_restic(self, c) -> None:
+        env = self.env_config
+        os.environ["RESTIC_PASSWORD"] = env["AZURE_PASSWORD"]
+        os.environ["AZURE_ACCOUNT_NAME"] = env["AZURE_ACCOUNT_NAME"]
+        os.environ["AZURE_ACCOUNT_KEY"] = env["AZURE_ACCOUNT_KEY"]
+
+    @property
+    def uri(self) -> str:
+        return f"azure:{self.env_config['AZURE_NAME']}:/"
+```
+
+```toml
+[project.entry-points."edwh_restic_plugin.repositories"]
+azure = "my_package"
+```
+
+Optional additions:
+
+- `wipe`, `bucket` and `prepare_rclone_config` are only needed for `restic.wipe` and
+  `restic.move`. Without them those two commands report that your backend does not support the
+  operation; everything else works.
+- `display_name()` is what notifications show. It defaults to the registered short name, which
+  discloses nothing — override it to add something informative but safe, like
+  `f"azure:{self.bucket}"`. Never return `uri`, which can contain credentials.
+
+Two conventions that are load-bearing:
+
+- `<SHORTNAME>_PASSWORD` in `.env` is how a default repository is auto-selected when
+  `--connection-choice` is omitted. A different name makes your repository unselectable by default.
+- `_short_name` and aliases feed forget-policy lookup, so `[restic.forget.azure]` works for free.
+
+## Design notes
+
+The reasoning behind the plugin and event architecture — including the alternatives that were
+rejected and why — is in [docs/plugins-architecture.md](docs/plugins-architecture.md).
 
 ## License
 

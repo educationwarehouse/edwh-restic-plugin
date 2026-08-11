@@ -1,7 +1,12 @@
 # Plugin architecture: custom repositories & event notifications
 
-Status: **design proposal**, not implemented. Decisions taken so far are recorded in
-[§10 Decisions](#10-decisions-taken).
+Status: **implemented** on `claude/restic-plugin-architecture-bc90v6`, except step 7 (a reference
+external notifier package, which lives in its own repository). Decisions are recorded in
+[§10 Decisions](#10-decisions-taken); the build order and what each step actually landed is in
+[§11](#11-implementation-order).
+
+This document is the reasoning, not the reference. For usage see the notifications section of the
+README.
 
 ## 1. Goals and non-goals
 
@@ -889,60 +894,73 @@ rather than failing a user. This is not optional given the decision above.
 
 ## 11. Implementation order
 
-Each step is independently shippable and leaves the tree green. Baseline at time of writing:
-11 tests pass under Python 3.12.
+Each step was independently shippable and left the tree green. Baseline before any of it:
+**11 tests, 21 ruff findings**. After: **112 tests, 16 ruff findings** (all 16 pre-existing, in
+`forget.py`, `env.py`, `hetzner.py` and the untouched parts of `tasks.py`), `ruff format` clean,
+and every new module passing `ty`.
 
-0. **Prerequisites that are not design work:**
-   - **An `edwh restic.check` task** (§6). Without it the `check.*` pair cannot fire and
-     `test_every_variant_is_actually_emitted` fails by construction.
-   - **Get the existing tooling green.** `pytest`, `ruff` and `ty` run before release, so the
-     §6 invariants do have a gate — but this repository does not currently pass two of the
-     three. Measured at the time of writing, on Python 3.12: **11 tests pass**, `ruff format`
-     is clean, but `ruff check` reports **21 findings** and `ty` reports **83**.
+0. ~~**Prerequisites**~~ — **done as part of the steps below.** The missing `edwh restic.check`
+   task landed with step 5. On tooling: `pytest`, `ruff` and `ty` run before release, so the §6
+   invariants do have a gate, but this repository did not pass two of the three when the design
+   was written. Four findings were real, and step 1 or 3 cleared three of them: `F821` undefined
+   `invoke` in `restore` (harmless at runtime, since PEP 526 does not evaluate local variable
+   annotations, but flagged by both tools), `F841` a dead local in `check_abstract_methode`, and
+   `E713`. The fourth, `F522` in `hetzner.py`'s `uri` — passing `account_id=` to a template that
+   never interpolates it — is untouched, because the URI it builds is correct and the kwarg is
+   simply a leftover.
 
-     Most are stylistic (`SIM108`, `E501`, `ARG001` on unused fixtures; `ty`'s 25
-     `invalid-parameter-default` are all `str = None` annotations that want `str | None`). Four
-     are real and two sit directly in code this design touches:
-
-     | Finding | Where | Assessment |
-     |---|---|---|
-     | `F821` undefined name `invoke` | `tasks.py`, in `restore` | `docker_inspect: invoke.Result` with no `import invoke`. Harmless at runtime — PEP 526 does not evaluate local variable annotations — but both tools flag it, and it is inside the function step 1 rewrites. |
-     | `F841` unused local `x` | `tasks.py`, `check_abstract_methode` | Dead assignment in the task §2.3 shrinks anyway. |
-     | `F522` unused `.format` argument | `hetzner.py`, `uri` | Passes `account_id=` to a template that never interpolates it. The URI is correct; the kwarg is a leftover. |
-     | `E713` `not ... in` | `tasks.py` | Autofixable. |
-
-     `ty`'s 19 `unresolved-import` are almost certainly missing stubs for `edwh`/`ewok`/`invoke`
-     rather than defects, and should be triaged before anyone treats the count as a target.
-
-     This is not blocking for steps 1–7, but it is worth knowing that "the gate is green" is not
-     true here yet, so a new module arriving with its own findings will be hard to distinguish
-     from the existing backlog.
+   Also corrected here: the `ty` count originally reported (83) was measured with the wrong
+   interpreter. With `--python` pointed at a 3.12 environment the 19 `unresolved-import`
+   diagnostics disappear entirely, confirming they were missing stubs rather than defects, and
+   more code becomes resolvable, so the real number is higher. Treat the count as a trend, not a
+   target.
 1. ~~**Refactor exits into exceptions** (§2.4)~~ — **done.** `exceptions.py` defines
-   `ResticError`, `NoScriptsFound`, `ResticScriptError`, `ResticConnectionError` and
-   `ScriptFailure`; `get_scripts`, `execute_files` and `sftp.py` raise instead of exiting, and
-   `@exits_on_restic_error` in `tasks.py` converts a `ResticError` back into its exit code at
-   the one place that knows the process is ending. The `max(file_codes)` precedence bug is fixed
-   — `ResticScriptError.exit_code` is now the worst script's real code rather than `True`.
-   Exit codes are preserved: 255 for no scripts, worst-script code for script failures, 1
-   otherwise.
-2. **Discovery + registry generalisation** (§3) — `plugins.py`, entry points, scoped
-   `discover()`, and the `registrations.get()` fix (§2.2).
-3. **Narrow the abstract surface** (§2.3) — `UnsupportedOperation`, graceful degradation
-   in `wipe`/`move`.
-4. **Event model + contract** (§6, §7) — the operation classes, the `Status` union, the
-   `__init_subclass__` registry,
-   `Repository.display_name()`, `CONTRACT_VERSION`, `py.typed`, and the secret-leak tripwire
-   test. No dispatch yet.
-5. **Notifier registry + emit sites** (§5) — the `emit_*` context managers, activation from
-   `[restic.notify] channels`, dispatcher-enforced timeout, contract check at discovery, plus
-   `MemoryNotifier` in tests.
-6. **Watchdog** (§8) — timer, escalation, per-target thresholds.
-7. **Reference external package** — `edwh-restic-ntfy` in a separate repository, which is
-   also the real proof the contract is usable from outside.
+   `ResticError`, `NoScriptsFound`, `ResticScriptError`, `ResticConnectionError`,
+   `UnsupportedOperation` and `ScriptFailure`; `get_scripts`, `execute_files` and `sftp.py` raise
+   instead of exiting, and `@exits_on_restic_error` in `tasks.py` converts a `ResticError` back
+   into its exit code at the one place that knows the process is ending. The `max(file_codes)`
+   precedence bug is fixed — `ResticScriptError.exit_code` is the worst script's real code rather
+   than `True`. Exit codes are preserved from the caller's view: 255 for no scripts, worst-script
+   code for script failures, 1 otherwise.
+2. ~~**Discovery + registry generalisation** (§3)~~ — **done.** `plugins.py` holds a generic
+   `Registry[T]`; `RepositoryRegistrations` is a four-line subclass. Entry points, scoped
+   `discover()`, the `[restic.plugins]` module list, failure isolation, and the
+   `registrations.get()` fix (§2.2). `config.py` implements the §9.1 warn-don't-write freeze.
+3. ~~**Narrow the abstract surface** (§2.3)~~ — **done.** `wipe`, `bucket` and
+   `prepare_rclone_config` are concrete and raise `UnsupportedOperation`; `wipe`/`move` degrade
+   with a message instead of a traceback.
+4. ~~**Event model + contract** (§6, §7)~~ — **done.** `events.py`: the operation classes, the
+   `Status` union, the `__init_subclass__` registry, plus `Repository.display_name()`,
+   `CONTRACT_VERSION`, `py.typed` (verified present in a built wheel), and the secret-leak
+   tripwire test.
+5. ~~**Notifier registry + emit sites** (§5)~~ — **done.** `notify.py`: the `Notifier` base,
+   `register_notifier`, activation from `[restic.notify] channels`, dispatcher-enforced timeout,
+   contract check at resolution time, and `MemoryNotifier` as the in-tree consumer. `repo_context`
+   in `tasks.py` is the single emit site, wired into `backup`, `restore`, `forget`, `wipe` and the
+   new `check`.
+6. ~~**Watchdog** (§8)~~ — **done.** `watchdog.py`: daemon timer, escalating thresholds,
+   per-target overrides, and no kill switch.
+7. **Reference external package** — `edwh-restic-ntfy`, still to do. It lives in its own
+   repository by design, and is the real proof the contract is usable from outside.
 
-Step 0 is genuinely blocking for the *enforcement* half of this design, not for the features:
-steps 1–7 can be written without CI, but the union-completeness and emit-coverage tests only
-protect anything once something runs them on push.
+### What implementation changed about the design
+
+Three things only became visible once the code existed:
+
+- **`Registry.push` relied on the plugin class being comparable.** `heapq` compares the second
+  tuple element when priorities tie. `Repository` gets away with it because `SortableMeta` defines
+  `__lt__`/`__gt__` for exactly that reason; `Notifier` does not, so two notifiers at equal
+  priority raised `TypeError`. Fixed with an insertion counter, which removes the need for a
+  sortable metaclass entirely and makes ties resolve in registration order rather than
+  arbitrarily.
+- **Rediscovery could not re-register.** `importlib.import_module` is a no-op for an
+  already-imported module, so `clear()` followed by `discover()` silently produced an empty
+  registry — and §3 requires that cycle to work, since scoped rediscovery is what keeps the
+  detection tests deterministic. Discovery now reloads.
+- **Per-operation phase sets were pointless.** §6 planned a phase set per operation on the
+  assumption that e.g. `wipe` could not fail. But `restic_reaper` can raise and the watchdog arms
+  on any `Started`, so the sets came out uniform. Replaced by `ALL_PHASES` plus a structural
+  coverage test.
 
 ## 12. Known issues outside this design
 
