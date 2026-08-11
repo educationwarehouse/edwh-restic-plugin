@@ -31,32 +31,32 @@ Explicit non-goals:
 ### Naming
 
 `captain-hooks/` already means "backup scripts, one per target" in this codebase
-(`repositories/__init__.py:28`, `get_scripts`). The new mechanism is therefore called
+(`repositories/__init__.py:30`, `get_scripts`). The new mechanism is therefore called
 **events** and **notifiers**, never "hooks". Reusing "hook" would make every future bug
 report ambiguous.
 
 ## 2. Current state: what already works and what blocks reuse
 
-`RepositoryRegistrations` (`repositories/__init__.py:406`) is already most of a plugin
+`RepositoryRegistrations` (`repositories/__init__.py:477`) is already most of a plugin
 registry — priority heap, aliases, lazy discovery, `@register()` decorator. Four defects
 block third-party use.
 
 ### 2.1 Discovery is hardcoded to the package directory
 
-`_find_items()` (`repositories/__init__.py:495`) globs `Path(__file__).parent/"*.py"`. An
+`_find_items()` (`repositories/__init__.py:525`) globs `Path(__file__).parent/"*.py"`. An
 installed external package can never be found. Fix in §3.
 
 ### 2.2 `registrations.get()` does not trigger discovery
 
 ```python
 def get(self, name: str) -> typing.Type[Repository] | None:
-    return self._aliases.get(name)   # repositories/__init__.py:452-453
+    return self._aliases.get(name)   # repositories/__init__.py:506-507
 ```
 
 `_aliases` is only populated by `push()`, which only runs from `_find_items()`, which is
 only reached via the `queue` property. `get()` bypasses `queue` entirely. This works today
-purely because `cli_repo` happens to call `to_ordered_dict()` first (`tasks.py:31`) before
-`registrations.get()` (`tasks.py:43`). Any other caller — including a future
+purely because `cli_repo` happens to call `to_ordered_dict()` first (`tasks.py:32`) before
+`registrations.get()` (`tasks.py:44`). Any other caller — including a future
 `notify`/`healthcheck` task — gets `None` from a correctly registered repository.
 
 **Fix:** `get()` must touch `self.queue` first, same as `to_ordered_dict()`.
@@ -65,12 +65,12 @@ purely because `cli_repo` happens to call `to_ordered_dict()` first (`tasks.py:3
 
 `Repository` declares six abstract members: `setup`, `prepare_for_restic`, `uri`, `wipe`,
 `bucket`, `prepare_rclone_config`. Only the first three are needed to perform a backup.
-The other three exist solely for the `wipe` (`tasks.py:340`) and `move` (`tasks.py:355`)
+The other three exist solely for the `wipe` (`tasks.py:317`) and `move` (`tasks.py:330`)
 tasks.
 
 Two pieces of evidence that this already hurts internally:
 
-- The `check_abstract_methode` task (`tasks.py:389`) exists only to find subclasses that
+- The `check_abstract_methode` task (`tasks.py:401`) exists only to find subclasses that
   forgot one.
 - `tests/test_repository_detection.py:31` defines `DummyRepostiory` implementing exactly
   `setup` and `prepare_for_restic` — the test author's implicit model of the minimum
@@ -87,15 +87,18 @@ checking three names.
 This is the blocker for the entire notification feature, and it is not obvious.
 
 ```python
-files = self.get_scripts(target, verb)   # calls sys.exit(255) on no match — line 222
+files = self.get_scripts(target, verb)   # calls sys.exit(255) on no match — line 242
 ...
 if worst_status_code := max(file_codes) > 0:
-    exit(worst_status_code)              # line 301
+    exit(worst_status_code)              # line 322
 ```
 
-Both are bare process exits from inside library code. No `except` or `finally` in a caller
-can run, so **no `backup.failed` notification can ever be delivered** for the two most
-common failure modes. Notification depends on converting these into exceptions first.
+There is a third, in a repository implementation: `sftp.py:69` calls `exit(1)` when its
+connection check fails.
+
+All three are bare process exits from inside library code. No `except` or `finally` in a caller
+can run, so **no `backup.failed` notification can ever be delivered** for the most common
+failure modes. Notification depends on converting these into exceptions first.
 
 While there: `worst_status_code := max(file_codes) > 0` is a precedence bug. The walrus
 binds the *comparison result*, so the process exits `1` for every failure regardless of
@@ -115,7 +118,7 @@ Three sources, in ascending precedence:
 1. **In-package modules** (current behaviour, repositories only).
 2. **Python entry points** — `edwh_restic_plugin.repositories` and
    `edwh_restic_plugin.notifiers`. This mirrors how edwh finds this plugin
-   (`[project.entry-points."edwh.tasks"]`, `pyproject.toml:44`), so being a
+   (`[project.entry-points."edwh.tasks"]`, `pyproject.toml:43`), so being a
    plugin-of-a-plugin adds no new concept: an external package declares
 
    ```toml
@@ -184,10 +187,10 @@ Two conventions worth documenting rather than enforcing, because they are load-b
 elsewhere in the code:
 
 - The `<SHORTNAME>_PASSWORD` env var is how `cli_repo` auto-selects a default repository
-  when `--connection-choice` is omitted (`tasks.py:29-35`). A plugin that names its
+  when `--connection-choice` is omitted (`tasks.py:34-40`). A plugin that names its
   password variable differently is silently unselectable.
 - `_short_name` and `_aliases` feed forget-policy lookup (`determine_forget_policy`,
-  `repositories/__init__.py:359`), so `[restic.forget.azure]` works for free.
+  `repositories/__init__.py:423`), so `[restic.forget.azure]` works for free.
 
 ## 5. Extension point 2 — Notifier
 
@@ -501,7 +504,7 @@ Notifiers wanting neither can ignore the union entirely and use only `EventBase`
 | `backup.succeeded` | info | Carries snapshot ids. Heartbeat notifiers subscribe here. |
 | `backup.failed` | error | Requires §2.4. |
 | `backup.slow` | warning | Watchdog; see §8. |
-| `restore.started` / `.succeeded` / `.failed` | info/info/error | `restore` also destroys pg volumes (`tasks.py:143`), so failure here is high-severity in practice. |
+| `restore.started` / `.succeeded` / `.failed` | info/info/error | `restore` also destroys pg volumes (`tasks.py:140-153`), so failure here is high-severity in practice. |
 | `check.succeeded` / `check.failed` | info/error | **The most valuable pair.** Silent repository corruption is the failure mode you otherwise discover during a restore. |
 | `forget.succeeded` / `.failed` | info/error | Include snapshots removed; a policy that suddenly prunes 400 snapshots is a signal. |
 | `wipe.started` / `.succeeded` | warning/warning | Destructive and irreversible, but user-initiated. Filterable like everything else. |
@@ -510,18 +513,46 @@ Notifiers wanting neither can ignore the union entirely and use only `EventBase`
 
 ### Where events are emitted
 
-At the **task layer** (`tasks.py`), via a decorator, not inside `Repository`:
+At the **task layer** (`tasks.py`), not inside `Repository` — because `Repository` subclasses
+are written by *plugin authors*, who must not have to remember to emit anything. Tasks are also
+the operation boundary a human cares about.
+
+**Not a decorator, though.** An earlier draft proposed `@emits("backup")` above `@task`. That
+does not work: every task resolves its repository *inside* its own body
+(`repo = cli_repo(connection_choice)`, `tasks.py:112`; `cli_repo(connection_choice).restore(...)`,
+`tasks.py:154`), so a decorator wrapping the function never sees the `Repository` instance and
+cannot fill `repo` or `repo_display`. Nor can it resolve one itself: `cli_repo` prints
+`Use connection: …` and calls `repo.setup()`, which calls `check_env` — an *interactive prompt*
+on a missing variable. Resolving twice would double-prompt.
+
+A context manager inside the body has everything the decorator lacked, at the cost of one line:
 
 ```python
-@task
-@emits("backup")     # started / succeeded / failed / duration, from one decorator
-def backup(c, target="", ...): ...
+repo = cli_repo(connection_choice)
+with emit_backup(repo, target=target) as run:      # backup.started here
+    repo.backup(c, verbose, target, message)
+    run.snapshot = ...                             # carried into backup.succeeded
+# __exit__ emits succeeded or failed, with duration, from the exception (or its absence)
 ```
 
-Rationale: tasks are the operation boundary a human cares about, one decorator yields the
-whole terminal-state triple plus timing, and — decisively — `Repository` subclasses are
-written by *plugin authors*, who must not have to remember to emit anything. Fine-grained
-`backup.script.failed` is the exception and is emitted from `execute_files`.
+`__enter__`/`__exit__` yield the whole terminal-state triple plus timing anyway, so nothing is
+lost but the appearance of zero-cost instrumentation. It also arms and disarms the watchdog
+(§8) at exactly the right boundaries.
+
+Known consequence: a failure *before* the `with` — an invalid `--connection-choice` raising
+`ValueError` from `cli_repo` (`tasks.py:44-46`), or an interactive `check_env` prompt the user
+abandons — emits nothing. That is acceptable: no backup had begun, and both cases are
+synchronous and interactive, so the operator sees the traceback. It would not be acceptable for
+cron'd operation, which is why the watchdog and an external heartbeat (§8) are the complement.
+
+Fine-grained `backup.script.failed` is emitted from `execute_files`
+(`repositories/__init__.py:246`), which is the only place per-script exit codes exist.
+
+**`check` has no task to hook.** `Repository.check()` exists
+(`repositories/__init__.py:348`) but **nothing calls it** — there is no `edwh restic.check`.
+So `check.succeeded`/`check.failed`, which §6 calls the most valuable pair, currently have no
+emit site and no way for a user to trigger them. Implementing the taxonomy therefore requires
+adding the task; see §11 step 0.
 
 ### Dispatch semantics
 
@@ -632,7 +663,7 @@ The main thread is blocked in `c.run(..., pty=True)`, so a daemon timer thread i
 correct primitive — no async, no subprocess supervision.
 
 **It does not kill the backup.** Killing restic mid-write risks leaving a stale repository
-lock, which is why `edwh restic.unlock` exists (`tasks.py:279`); a watchdog that routinely
+lock, which is why `edwh restic.unlock` exists (`tasks.py:269`); a watchdog that routinely
 creates work for that task is a net loss. If a hard kill is ever wanted, it belongs behind
 a separate, explicitly-named `hard_timeout` option, and invoke's `run(timeout=)` already
 provides the mechanism.
@@ -718,7 +749,7 @@ does.
 
 The current `get_or_copy_policy` implements the freeze by writing the template into `.toml`
 on first read. That works, but the write is invisible and its shape is surprising: since
-`determine_forget_policy` (`repositories/__init__.py:359`) tries `_short_name` first, the
+`determine_forget_policy` (`repositories/__init__.py:423`) tries `_short_name` first, the
 first `edwh restic.forget` against an S3 repository writes `[restic.forget.s3] = <the default
 values>`. `.toml` then asserts that s3 is customised when it merely holds defaults — and a
 user who later hand-edits `[restic.forget.default]` is silently overridden by that
@@ -793,32 +824,47 @@ rather than failing a user. This is not optional given the decision above.
 
 ## 11. Implementation order
 
-Each step is independently shippable and leaves the tree green.
+Each step is independently shippable and leaves the tree green. Baseline at time of writing:
+11 tests pass under Python 3.12.
 
+0. **Prerequisites that are not design work**, and were missing when this was written:
+   - **CI.** There is no `.github/` at all, so nothing runs the suite. Every "CI-enforced"
+     invariant in §6 is aspirational until a workflow exists. Add one pinned to **3.12** —
+     `pyproject.toml` declares `requires-python = ">=3.12"` and `ewok>=0.4.8` publishes no
+     wheel for 3.11, so the dependency set is uninstallable below 3.12.
+   - **An `edwh restic.check` task.** `Repository.check()` exists
+     (`repositories/__init__.py:348`) with no caller. Note it runs `check --read-data`, which
+     re-downloads the entire repository — acceptable interactively, expensive as a cron job
+     against S3 egress, so the task wants a `--read-data-subset` option rather than inheriting
+     that default blindly.
 1. **Refactor exits into exceptions** (§2.4) — `ResticError`, `NoScriptsFound`,
-   `ResticScriptError`; `get_scripts` and `execute_files` raise, `tasks.py` catches at the
-   top level and sets the process exit code there. Fix the `max(file_codes)` precedence
+   `ResticScriptError`; `get_scripts`, `execute_files` and `sftp.py` raise, `tasks.py` catches
+   at the top level and sets the process exit code there. Fix the `max(file_codes)` precedence
    bug. *No new features; changes observable exit codes, so it goes first and alone.*
 2. **Discovery + registry generalisation** (§3) — `plugins.py`, entry points, scoped
    `discover()`, and the `registrations.get()` fix (§2.2).
 3. **Narrow the abstract surface** (§2.3) — `UnsupportedOperation`, graceful degradation
    in `wipe`/`move`.
-4. **Event model + contract** (§6, §7) — the dataclass and its factory,
+4. **Event model + contract** (§6, §7) — the variants and their `__init_subclass__` registry,
    `Repository.display_name()`, `CONTRACT_VERSION`, `py.typed`, and the secret-leak tripwire
    test. No dispatch yet.
-5. **Notifier registry + `@emits` dispatch** (§5) — activation from `[restic.notify]
-   channels`, dispatcher-enforced timeout, contract check at discovery, plus `MemoryNotifier`
-   in tests.
+5. **Notifier registry + emit sites** (§5) — the `emit_*` context managers, activation from
+   `[restic.notify] channels`, dispatcher-enforced timeout, contract check at discovery, plus
+   `MemoryNotifier` in tests.
 6. **Watchdog** (§8) — timer, escalation, per-target thresholds.
 7. **Reference external package** — `edwh-restic-ntfy` in a separate repository, which is
    also the real proof the contract is usable from outside.
+
+Step 0 is genuinely blocking for the *enforcement* half of this design, not for the features:
+steps 1–7 can be written without CI, but the union-completeness and emit-coverage tests only
+protect anything once something runs them on push.
 
 ## 12. Known issues outside this design
 
 Both are pre-existing and independent of the plugin work; recorded here because they were
 found while mapping the code, not proposed as part of it.
 
-- **`restore` destroys before it verifies.** `tasks.py:143-159` stops the pg containers and
+- **`restore` destroys before it verifies.** `tasks.py:140-154` stops the pg containers and
   removes their volumes *before* calling `restore`. If the restore then fails — bad snapshot
   id, unreachable repository, wrong password — the old data is already gone and the failure
   notification arrives too late to matter. Notification cannot fix this; the ordering can.
