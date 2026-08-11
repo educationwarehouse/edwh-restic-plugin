@@ -1,15 +1,12 @@
 import abc
 import contextlib
 import datetime
-import heapq
-import importlib
-import importlib.util
 import io
 import os
 import re
 import sys
 import typing
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from pathlib import Path
 
 import invoke
@@ -17,12 +14,12 @@ from invoke import Context
 from invoke.exceptions import AuthFailure
 from termcolor import cprint
 from tqdm import tqdm
-from typing_extensions import NotRequired
 
 from ..env import DOTENV, check_env, read_dotenv
 from ..exceptions import NoScriptsFound, ResticScriptError, ScriptFailure
 from ..forget import ResticForgetPolicy
 from ..helpers import _require_restic, camel_to_snake, fix_tags
+from ..plugins import Registration, Registry
 
 if typing.TYPE_CHECKING:
     from restic_reaper import WipeOutcome
@@ -480,68 +477,14 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         return False
 
 
-class RepositoryRegistration(typing.TypedDict):
-    short_name: str
-    aliases: NotRequired[tuple[str, ...]]
-    priority: NotRequired[int]
+#: Kept as an alias so existing imports keep working; the shape is registry-agnostic now.
+RepositoryRegistration = Registration
 
 
-class RepositoryRegistrations:
-    def __init__(self) -> None:
-        # _queue is for internal use by heapq only!
-        # external api should use .queue !!!
-        self._queue: list[tuple[int, typing.Type[Repository], RepositoryRegistration]] = []
-        # aliases stores a reference for each name to the Repo class
-        self._aliases: dict[str, typing.Type[Repository]] = {}
-
-    def push(self, repo: typing.Type[Repository], settings: RepositoryRegistration):
-        priority = settings.get("priority", -1)
-        if priority < 0:
-            priority = sys.maxsize - priority  # very high int
-
-        heapq.heappush(self._queue, (priority, repo, settings))
-        self._aliases[settings["short_name"]] = repo
-        for alias in settings.get("aliases", []):
-            self._aliases[alias] = repo
-
-    @property
-    def queue(self):
-        if not self._queue:
-            self._find_items()
-
-        return self._queue
-
-    def clear(self):
-        self._queue = []
-        self._aliases = {}
-
-    def get(self, name: str) -> typing.Type[Repository] | None:
-        return self._aliases.get(name)
-
-    def to_sorted_list(self):
-        # No need for sorting here; heapq maintains the heap property
-        return list(self)
-
-    def to_ordered_dict(self) -> OrderedDict[str, typing.Type[Repository]]:
-        ordered_dict = OrderedDict()
-        for _, item, settings in self.queue:
-            ordered_dict[settings["short_name"]] = item
-        return ordered_dict
-
-    def __iter__(self) -> typing.Generator[typing.Type[Repository], None, None]:
-        return (item[1] for item in self.queue)
-
-    def __bool__(self):
-        return bool(self.queue)
-
-    def _find_items(self) -> None:
-        # import all registrations in this folder, so @register adds them to _queue
-        package_path = Path(__file__).resolve().parent
-
-        for file_path in package_path.glob("*.py"):
-            pkg = file_path.stem
-            if not pkg.startswith("__"):
-                importlib.import_module(f".{pkg}", package=__name__)
+class RepositoryRegistrations(Registry[Repository]):
+    entry_point_group = "edwh_restic_plugin.repositories"
+    in_package = __name__  # this package's *.py files, i.e. local.py, s3.py, ...
+    config_key = "repositories"
 
 
 def register(
