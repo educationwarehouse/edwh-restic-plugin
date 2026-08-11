@@ -218,31 +218,201 @@ one answer, greppable in one file.
 listed in `channels` but with no token in `.env` means "not yet", logged once, not an error.
 That keeps a partially provisioned machine from failing its backups over notification setup.
 
-## 6. Event model
+### 5.1 A complete external notifier
 
-A frozen dataclass, not a dict, so plugin authors get autocompletion and mypy coverage.
+**Plugins never read `.toml` or `default.toml`.** Core resolves configuration and hands over
+two plain mappings: `options` is the already-resolved `[restic.notify.<short_name>]` table
+(template fallback and the §9.1 warnings all happen upstream), and `env` is the parsed `.env`
+dict. `env` is passed explicitly rather than read from `os.environ` for two reasons — it
+mirrors `Repository.env_config` (`repositories/__init__.py:150`), and by the time a notifier
+runs, `os.environ` has been loaded with restic's credentials by `prepare_for_restic`, so the
+convenient path should not be the one that walks past them.
+
+`mycorp_restic_webhook/__init__.py`, entire:
 
 ```python
-@dataclass(frozen=True, kw_only=True)
-class Event:
-    name: str                    # "backup.failed"
-    ts: datetime
-    level: Literal["info", "warning", "error"]
-    repo: str                    # short_name, e.g. "s3"
-    host: str                    # RESTICHOSTNAME or platform hostname
-    project: str                 # cwd name, or [restic.notify] project
-    target: str | None           # backup target ("files", "stream", ...)
-    duration: float | None       # seconds, on terminal events
-    exit_code: int | None
-    snapshot: str | None
-    message: str | None          # the snapshot message / error text
-    logs: str | None             # restic stdout/stderr on failures — see §7.1
-    extra: Mapping[str, str]     # event-specific; populated only by in-package emit sites
+from typing import Any, Mapping, Self
+
+import httpx
+from edwh_restic_plugin.plugins import (
+    CONTRACT_VERSION, BackupFailed, CheckFailed, Event, Notifier, register_notifier,
+)
+
+
+@register_notifier("mywebhook")
+class MyWebhook(Notifier):
+    contract = CONTRACT_VERSION
+
+    def __init__(self, url: str, secret: str) -> None:
+        self.url = url
+        self.secret = secret
+
+    @classmethod
+    def from_config(cls, env: Mapping[str, str], options: Mapping[str, Any]) -> Self | None:
+        url = options.get("webhook_url")              # from .toml
+        secret = env.get("PLUGIN_WEBHOOK_SECRET")     # from .env
+        if not (url and secret):
+            return None                               # named but unprovisioned -> inactive
+        return cls(url, secret)
+
+    def format(self, event: Event) -> str:
+        match event:
+            case BackupFailed(exit_code=code, logs=logs):
+                return f"{event.repo_display} backup failed (exit {code})\n{logs or ''}"
+            case CheckFailed():
+                return f"REPOSITORY DAMAGED: {event.repo_display}"
+            case _:
+                return super().format(event)          # sensible default for the rest
+
+    def send(self, event: Event) -> None:
+        httpx.post(
+            self.url,
+            headers={"X-Webhook-Secret": self.secret},
+            json={"event": event.name, "level": event.level, "text": self.format(event)},
+        )
 ```
 
-Note what is *absent*: no `repo_uri`, no `env`, no `os.environ` passthrough. That is the
-whole of §7.1. The fields above are the complete contract surface — adding one is a
-deliberate act, reviewed as such.
+Its `pyproject.toml` — one entry point, and `httpx` is its dependency, not ours:
+
+```toml
+[project.entry-points."edwh_restic_plugin.notifiers"]
+mywebhook = "mycorp_restic_webhook"
+```
+
+Consuming project, `.env`:
+
+```
+PLUGIN_WEBHOOK_SECRET=hunter2
+```
+
+Consuming project, `.toml`:
+
+```toml
+[restic.notify]
+channels = ["mywebhook"]
+
+[restic.notify.mywebhook]
+webhook_url = "https://hooks.mycorp.internal/restic"
+events      = ["backup.failed", "check.failed"]
+```
+
+Everything a plugin author must know is in that file: one decorator, one classmethod, one
+`send`. No config parsing, no discovery code, no `.env` handling, no timeout management (§5,
+dispatch semantics — core enforces it), no exception handling (core catches).
+
+## 6. Event model
+
+A **tagged union of frozen dataclasses**, discriminated on `name`. Not one wide dataclass
+with a `str` name and an untyped `extra` bag: that pushes every "is this field set for this
+event?" question to runtime, which is exactly the question a plugin author needs answered
+while writing.
+
+```python
+Level = Literal["info", "warning", "error"]
+
+@dataclass(frozen=True, kw_only=True)
+class EventBase:
+    ts: datetime
+    level: Level
+    repo: str                     # short_name, e.g. "s3"
+    repo_display: str             # Repository.display_name() — §7.1, never the raw uri
+    host: str                     # RESTICHOSTNAME or platform hostname
+    project: str                  # cwd name, or [restic.notify] project
+
+@dataclass(frozen=True, kw_only=True)
+class BackupStarted(EventBase):
+    name: Literal["backup.started"] = "backup.started"
+    target: str | None
+
+@dataclass(frozen=True, kw_only=True)
+class BackupSucceeded(EventBase):
+    name: Literal["backup.succeeded"] = "backup.succeeded"
+    target: str | None
+    duration: float
+    snapshot: str | None
+    message: str | None           # the snapshot message
+
+@dataclass(frozen=True, kw_only=True)
+class BackupFailed(EventBase):
+    name: Literal["backup.failed"] = "backup.failed"
+    target: str | None
+    duration: float
+    exit_code: int
+    logs: str | None              # full stdout/stderr — §7.1
+
+@dataclass(frozen=True, kw_only=True)
+class BackupScriptFailed(EventBase):
+    name: Literal["backup.script.failed"] = "backup.script.failed"
+    script: str                   # the captain-hooks file that failed
+    exit_code: int
+    logs: str | None
+
+@dataclass(frozen=True, kw_only=True)
+class BackupSlow(EventBase):
+    name: Literal["backup.slow"] = "backup.slow"
+    target: str | None
+    elapsed: float                # not `duration`: the backup has not finished
+    threshold: float              # which warn_after step tripped
+    script: str | None            # currently-running script, if known
+
+# ... restore.*, check.*, forget.*, wipe.* likewise
+
+Event = (
+    BackupStarted | BackupSucceeded | BackupFailed | BackupScriptFailed | BackupSlow
+    | RestoreStarted | RestoreSucceeded | RestoreFailed
+    | CheckSucceeded | CheckFailed
+    | ForgetSucceeded | ForgetFailed
+    | WipeStarted | WipeSucceeded
+)
+EventName = Literal[
+    "backup.started", "backup.succeeded", "backup.failed", "backup.script.failed",
+    "backup.slow", "restore.started", "restore.succeeded", "restore.failed",
+    "check.succeeded", "check.failed", "forget.succeeded", "forget.failed",
+    "wipe.started", "wipe.succeeded",
+]
+```
+
+Three things this buys that the wide-dataclass version could not:
+
+- **`exit_code` is `int`, not `int | None`.** It exists on failure events and nowhere else,
+  so the type states that instead of documenting it. Same for `duration`, `snapshot`,
+  `script`.
+- **`extra` is gone.** Event-specific data has a declared home — `BackupSlow.threshold`,
+  `BackupScriptFailed.script` — rather than a `Mapping[str, str]` that every emit site
+  populates by convention and every consumer reads by guesswork.
+- **`BackupSlow.elapsed` is not `duration`.** The wide version forced both concepts through
+  one field, quietly meaning "final runtime" on some events and "so far" on others. Splitting
+  the classes made the naming bug visible.
+
+### Exhaustiveness
+
+`match` narrows on class patterns, and `assert_never` turns a missing arm into a type error:
+
+```python
+def send(self, event: Event) -> None:
+    match event:
+        case BackupFailed() | CheckFailed() | RestoreFailed() | ForgetFailed():
+            self.page_someone(event)
+        case BackupSlow(elapsed=secs):
+            self.warn(f"still running after {secs / 60:.0f}m")
+        case _:
+            assert_never(event)   # mypy errors here if a variant is unhandled
+```
+
+**This is opt-in, and it interacts with versioning (§7.2).** Adding an event name is a minor
+bump — it widens the union without changing existing variants, so a notifier keeps *running*
+unchanged. But a notifier that ends in `assert_never` will *fail type-checking* against the
+new version until it adds an arm. That is the intended trade and authors should choose
+knowingly:
+
+| Final arm | On a new event at runtime | On a new event in CI |
+|---|---|---|
+| `case _: return` | ignored silently | passes |
+| `case _: self.generic(event)` | handled generically | passes |
+| `case _: assert_never(event)` | unreachable, so no effect | **fails, with the missing variant named** |
+
+Notifiers wanting neither can ignore the union entirely and use only `EventBase` fields plus
+`event.name` and `event.level` — which is what §5.1's `send` does.
 
 ### Taxonomy
 
@@ -313,9 +483,10 @@ Two consequences worth naming:
   `Repository.display_name()`, defaulting to `_short_name`, which a subclass may override
   to something informative-but-safe (`"s3:acme-backups"`). Safe by construction: a plugin
   that doesn't implement it discloses nothing.
-- **No `env` and no `os.environ` passthrough**, in any form, including inside `extra`.
-  `extra` is `Mapping[str, str]` and is populated only by emit sites in this package — it is
-  contract surface, not an escape hatch.
+- **No `env` and no `os.environ` passthrough**, in any form. There is also no free-form
+  `extra` mapping to smuggle one through — §6's tagged union means every field on every event
+  is declared, so the allowlist is enforced by the type, not by a convention about what emit
+  sites are supposed to put in a dict.
 
 **This is a guardrail, not a security boundary, and the docs must say so.** A notifier runs
 in-process; it can read `os.environ` and `.env` directly whenever it likes. No in-process
@@ -359,17 +530,18 @@ Supporting pieces, all cheap:
 
 - Ship **`py.typed`** (the package has none today) so plugin authors get real type checking
   across the boundary.
-- `Event`, `Notifier` and `Repository` are importable from **one stable module path**
-  (`edwh_restic_plugin.plugins`), so plugins never reach into `.repositories` internals.
-- `TypedDict` for structured payloads where useful, matching the existing `restictypes.py`
-  idiom rather than inventing a second convention.
+- `Notifier`, `Repository`, `Event`, `EventName`, every event variant and `CONTRACT_VERSION`
+  are importable from **one stable module path** (`edwh_restic_plugin.plugins`), so plugins
+  never reach into `.repositories` internals.
 - The dispatcher **duck-types** `send` rather than requiring `isinstance`, so a notifier
   package can type against the ABC without a hard runtime import of it.
 
-Bumping `CONTRACT_VERSION` is for changes that break a consumer: a removed or renamed field,
-a changed `send` signature. Adding an event name does not bump it — which means a `*`
-subscriber will receive names it has never heard of, and tolerating that is a documented
-obligation of implementing `send`.
+Bumping `CONTRACT_VERSION` is for changes that break a consumer at *runtime*: a removed or
+renamed field, a changed `send` signature, a variant dropped from the union. Adding an event
+name does **not** bump it — the union widens, existing variants are untouched, and a `*`
+subscriber keeps working. It will however receive names it has never heard of, so tolerating
+that is a documented obligation of implementing `send`, and it is the one case where a
+type-check can fail while the runtime contract holds (§6, Exhaustiveness).
 
 ## 8. Watchdog: detecting hanging backups
 
@@ -382,7 +554,7 @@ The main thread is blocked in `c.run(..., pty=True)`, so a daemon timer thread i
 correct primitive — no async, no subprocess supervision.
 
 **It does not kill the backup.** Killing restic mid-write risks leaving a stale repository
-lock, which is why `inv restic.unlock` exists (`tasks.py:279`); a watchdog that routinely
+lock, which is why `edwh restic.unlock` exists (`tasks.py:279`); a watchdog that routinely
 creates work for that task is a net loss. If a hard kill is ever wanted, it belongs behind
 a separate, explicitly-named `hard_timeout` option, and invoke's `run(timeout=)` already
 provides the mechanism.
@@ -469,7 +641,7 @@ does.
 The current `get_or_copy_policy` implements the freeze by writing the template into `.toml`
 on first read. That works, but the write is invisible and its shape is surprising: since
 `determine_forget_policy` (`repositories/__init__.py:359`) tries `_short_name` first, the
-first `inv restic.forget` against an S3 repository writes `[restic.forget.s3] = <the default
+first `edwh restic.forget` against an S3 repository writes `[restic.forget.s3] = <the default
 values>`. `.toml` then asserts that s3 is customised when it merely holds defaults — and a
 user who later hand-edits `[restic.forget.default]` is silently overridden by that
 auto-written block.
@@ -504,13 +676,15 @@ which case `from_toml_file("default", default_toml_path)` returns `None` too, be
 | Extension mechanism | A single tier: the Python entry-point API. No URL-library delegation, no executable-hook tier, no subprocess isolation. |
 | Trust model | Documented, not enforced. A notifier is trusted like any dependency; the docs warn about log destinations (§7.1). |
 | Event fields | Allowlist. No `repo_uri`, no env passthrough. Full stdout/stderr permitted in `logs` on failures. |
+| Event schema | Tagged union of frozen dataclasses discriminated on a `Literal` `name`; no free-form `extra`. Exhaustive matching via `assert_never` is available and opt-in. |
+| Plugin config access | Core resolves everything and passes `env` (parsed `.env`) plus `options` (resolved `[restic.notify.<name>]`) to `from_config`. Plugins never open `.toml`. |
 | Notifier activation | Explicit — named in `[restic.notify] channels`. Unlike repositories, not env-presence. |
 | Notifier failure | Caught, logged, timed out by the dispatcher, never fatal. A backup never fails because a channel is down. |
 | Event filtering | Uniform. No event bypasses `min_level` or per-channel `events`. |
 | Contract versioning | `CONTRACT_VERSION` integer; warn-and-skip on mismatch at discovery. Plus `py.typed`. |
 | Multiple repos per run | Out of scope, nothing reserved in the schema. One repository per invocation, as `cli_repo` does today. |
 | v1 scope | Repository entry-point discovery + narrowed abstract surface; event model + notifier registry + dispatch; watchdog for hanging backups. |
-| Deferred | Heartbeat/dead-man's-switch (external notifier, needs no core work beyond `backup.succeeded`), `inv restic.healthcheck` snapshot-age task, local single-file plugins, hard kill on timeout. |
+| Deferred | Heartbeat/dead-man's-switch (external notifier, needs no core work beyond `backup.succeeded`), `edwh restic.healthcheck` snapshot-age task, local single-file plugins, hard kill on timeout. |
 
 ### Rejected, and why
 
