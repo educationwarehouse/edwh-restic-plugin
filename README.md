@@ -16,6 +16,7 @@
 - [Wipe (destructive)](#wipe-destructive)
 - [Integrity checks](#integrity-checks)
 - [Notifications](#notifications)
+- [Trying your channels out](#trying-your-channels-out)
 - [Custom repository types](#custom-repository-types)
 - [License](#license)
 
@@ -396,6 +397,34 @@ Event names are `<operation>.<phase>`. Operations are `backup`, `restore`, `chec
 nothing; they are interactive and read-only.
 
 Filtering is uniform: no event bypasses `min_level` or a channel's `events` list.
+
+### Trying your channels out
+
+`restic.notify-test` sends a synthetic event to your **real** notifiers, so you can check a channel
+works without waiting for a genuine failure or forcing one.
+
+```console
+edwh restic.notify-test                              # backup.failed to every configured channel
+edwh restic.notify-test --event check.failed
+edwh restic.notify-test --channel discord            # just one channel
+edwh restic.notify-test --force                      # ignore events/min_level filtering
+edwh restic.notify-test --all-events                 # every operation.phase in turn
+edwh restic.notify-test --connection s3              # resolve the repo, so events carry its name
+```
+
+Nothing is faked except the event: it goes through the same dispatcher, the same routing and the
+same timeout as a real one.
+
+Two things worth knowing:
+
+- **Every drill is marked `NOTIFY-TEST`** in the fields a channel displays, so nobody woken at 3am
+  has to work out whether it was real.
+- **Channels filtered out by routing are reported**, not skipped silently. If `discord` only
+  subscribes to `backup.failed` and you send `check.succeeded`, you are told it was filtered rather
+  than left wondering whether the plugin is broken. `--force` sends anyway, which separates "this
+  channel is broken" from "my routing does not match".
+
+The task exits non-zero if nothing could be delivered, so it is usable as a provisioning check.
 
 ### Writing a notifier
 

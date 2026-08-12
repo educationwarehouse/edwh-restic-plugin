@@ -19,7 +19,7 @@ from .events import BackupEvent, BasicEvent, CheckEvent, ForgetEvent, RestoreEve
 from .exceptions import ResticError, UnsupportedOperation
 from .forget import ResticForgetPolicy
 from .helpers import _require_restic
-from .notify import Operation
+from .notify import Dispatcher, Operation, build_channels, build_test_event, event_names
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
 
@@ -103,6 +103,81 @@ def repo_context(
     universal.
     """
     return Operation(connection_choice, event_class, cli_repo, require_restic, **fields).run()
+
+
+@task(aliases=("notify-test", "test-notify"))
+@exits_on_restic_error
+def notify_test(
+    _c: Context,
+    event: str = "backup.failed",
+    connection: str | None = None,
+    channel: str | None = None,
+    force: bool = False,
+    all_events: bool = False,
+):
+    """Send a synthetic event to your real notifiers, so you can try them without breaking a backup.
+
+    Events are marked NOTIFY-TEST in the fields a channel is likely to display, because a drill that
+    looks identical to a genuine 3am alert is worse than no drill.
+
+    Args:
+        _c (Context)
+        event (str): which `<operation>.<phase>` to send. Use --all-events for every one.
+        connection (str, optional): resolve this repository so events carry its real display name.
+            Left out, they say "no repository resolved" instead of touching a backend.
+        channel (str, optional): only send to this channel, instead of all configured ones.
+        force (bool): send even to channels whose `events` or `min_level` would filter it out.
+            Use this to prove a channel works at all, separately from whether your routing is right.
+        all_events (bool): send every `<operation>.<phase>` in turn.
+    """
+    channels = build_channels()
+    if channel:
+        channels = [ch for ch in channels if ch.notifier._short_name == channel]
+        if not channels:
+            configured = ", ".join(sorted(ch.notifier._short_name for ch in build_channels())) or "none"
+            raise ResticError(f"no active channel named {channel!r}; configured: {configured}")
+
+    if not channels:
+        raise ResticError(
+            "no channels are active. Name them in [restic.notify] channels, and check their credentials are in .env."
+        )
+
+    repo_display = None
+    if connection:
+        # Resolving is opt-in: the point of this task is to exercise notifiers, and it should work
+        # on a machine where the backend is unreachable.
+        repo_display = cli_repo(connection).display_name
+
+    names = event_names() if all_events else [event]
+    dispatcher = Dispatcher(channels)
+    delivered = 0
+
+    for name in names:
+        built = build_test_event(name, repo_display)
+        wanted = [ch for ch in channels if ch.wants(built)]
+        skipped = [ch for ch in channels if ch not in wanted]
+
+        for ch in skipped:
+            # Reported rather than silent: "nothing arrived" otherwise looks like a broken plugin
+            # when it is really the routing doing its job.
+            cprint(
+                f"{name}: skipping '{ch.notifier._short_name}' (filtered by events/min_level)"
+                + ("; sending anyway because --force" if force else ""),
+                color="yellow",
+            )
+
+        targets = channels if force else wanted
+        for ch in targets:
+            cprint(f"{name} -> {ch.notifier._short_name}", color="blue")
+            dispatcher.send_to(ch, built)
+            delivered += 1
+
+    if not delivered:
+        raise ResticError(
+            "nothing was delivered: every channel filtered these events out. Re-run with --force to bypass routing."
+        )
+
+    cprint(f"\ndelivered {delivered} event(s). Nothing was backed up, restored or deleted.", color="green")
 
 
 @task

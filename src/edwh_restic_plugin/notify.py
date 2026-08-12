@@ -7,6 +7,7 @@ directly. What is guaranteed is that it cannot affect the backup.
 
 import abc
 import contextlib
+import dataclasses as dc
 import datetime as dt
 import os
 import platform
@@ -20,8 +21,20 @@ from termcolor import cprint
 
 from .config import read_config
 from .env import DOTENV, read_dotenv
-from .events import BasicEvent, Failed, Level, Slow, Started, Status, Succeeded, level_for, matches
-from .exceptions import ResticError, ResticScriptError
+from .events import (
+    ALL_PHASES,
+    BasicEvent,
+    Failed,
+    Level,
+    Phase,
+    Slow,
+    Started,
+    Status,
+    Succeeded,
+    level_for,
+    matches,
+)
+from .exceptions import ResticError, ResticScriptError, ScriptFailure
 from .registry import CONTRACT_VERSION, MIN_SUPPORTED_CONTRACT, Registration, Registry
 from .watchdog import Watchdog
 
@@ -235,9 +248,14 @@ class Dispatcher:
         with self._lock:
             for channel in self.channels:
                 if channel.wants(event):
-                    self._send(channel, event)
+                    self.send_to(channel, event)
 
-    def _send(self, channel: Channel, event: BasicEvent) -> None:
+    def send_to(self, channel: Channel, event: BasicEvent) -> None:
+        """Deliver to one channel regardless of its routing, with the same timeout and containment.
+
+        Public so `restic.notify-test` can bypass filtering deliberately; dispatch() applies routing
+        first and then comes here.
+        """
         name = channel.notifier._short_name
         error: list[BaseException] = []
 
@@ -395,7 +413,75 @@ def _logs_of(error: BaseException) -> str:
     return str(error)
 
 
+#: Put in the fields of a synthetic event so a recipient can tell a drill from the real thing. A
+#: test that looks identical to a genuine alert is worse than no test at all.
+TEST_MARKER = "NOTIFY-TEST"
+
+#: Plausible values for a synthetic event, filtered per operation to the fields it actually has, so
+#: adding an operation does not need a change here.
+_SAMPLE_FIELDS: dict[str, t.Any] = {
+    "target": "files",
+    "snapshot": "0000000000000000000000000000000000000000000000000000000000000000",
+    "message": f"{TEST_MARKER}: synthetic event, nothing actually happened",
+    "scripts": (ScriptFailure(script=f"backup_files_{TEST_MARKER.lower()}.sh", exit_code=42),),
+    "policy": "--keep-last 7 --prune",
+    "snapshots_removed": 3,
+    "read_data": False,
+    "subset": "",
+}
+
+
+def sample_status(phase: Phase) -> Status:
+    """A status object for any phase, with values that read as obviously synthetic."""
+    match phase:
+        case "started":
+            return Started()
+        case "succeeded":
+            return Succeeded(duration=42.0)
+        case "failed":
+            return Failed(duration=42.0, exit_code=42, logs=f"{TEST_MARKER}: no restic was harmed")
+        case "slow":
+            return Slow(elapsed=4200.0, threshold=1800.0)
+        case _:
+            t.assert_never(phase)
+
+
+def build_test_event(name: str, repo_display: str | None = None) -> BasicEvent:
+    """Build a synthetic `<operation>.<phase>` event, marked so it cannot pass for a real one.
+
+    Raises ValueError on an unknown operation or phase, listing what is available, since a typo here
+    would otherwise look like a plugin that silently ignores you.
+    """
+    operation, _, phase = name.partition(".")
+    if not (event_class := BasicEvent.operations.get(operation)):
+        known = ", ".join(sorted(BasicEvent.operations))
+        raise ValueError(f"unknown operation {operation!r}; expected one of {known}")
+
+    if phase not in ALL_PHASES:
+        raise ValueError(f"unknown phase {phase!r}; expected one of {', '.join(ALL_PHASES)}")
+
+    accepted = {f.name for f in dc.fields(event_class)}
+    fields = {key: value for key, value in _SAMPLE_FIELDS.items() if key in accepted}
+
+    return event_class(
+        status=sample_status(phase),
+        ts=dt.datetime.now(),
+        level=level_for(phase),
+        repo=repo_display or TEST_MARKER.lower(),
+        repo_display=f"{repo_display or 'no repository resolved'} [{TEST_MARKER}]",
+        host=_hostname(),
+        project=_project(),
+        **fields,
+    )
+
+
+def event_names() -> list[str]:
+    """Every `<operation>.<phase>` this build can emit."""
+    return [f"{operation}.{phase}" for operation in sorted(BasicEvent.operations) for phase in ALL_PHASES]
+
+
 __all__ = [
+    "TEST_MARKER",
     "Channel",
     "Dispatcher",
     "Emitter",
