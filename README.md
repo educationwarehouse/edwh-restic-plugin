@@ -336,29 +336,41 @@ Secrets go in `.env`; routing goes in `.toml` next to `[restic.forget]`:
 
 ```toml
 [restic.notify]
-project    = "acme-prod"          # defaults to the directory name
-channels   = ["ntfy", "discord"]  # nothing is active unless it is named here
-min_level  = "warning"            # global floor: info | warning | error
-warn_after = ["30m", "2h"]        # emit backup.slow at each
+channels   = ["ntfy", "discord"]  # REQUIRED: nothing is sent unless a channel is named here
+project    = "acme-prod-db01"     # optional, defaults to the directory name
+min_level  = "warning"            # optional, default "info": info | warning | error
+warn_after = ["30m", "2h"]        # optional, default ["30m", "2h"]: emit backup.slow at each
 
-[restic.notify.ntfy]
-events = ["*"]                    # ntfy gets everything
+[restic.notify.ntfy]              # one table per channel, named after the notifier
+topic      = "acme-backups"       # plugin-specific: whatever this notifier's from_config reads
+events     = ["*"]                # optional, defaults to the notifier's own `subscribes`
+min_level  = "info"               # optional, overrides the global floor for this channel
 
 [restic.notify.discord]
-events = ["backup.failed", "check.failed"]   # humans get only the bad news
+webhook_url = "https://discord.com/api/webhooks/..."
+events      = ["backup.failed", "check.failed"]   # humans get only the bad news
 
-[restic.notify.targets.stream]
+[restic.notify.targets.stream]    # optional per-backup-target watchdog override
 warn_after = ["4h"]               # pg dumps are legitimately slow
 ```
 
-**Activation is explicit.** A notifier runs only if `channels` names it, so installing a package
-sends nothing until you wire it up. If a channel is named but its credentials are not in `.env`
-yet, it is skipped with a note rather than treated as an error.
+Inside a channel table, **`events` and `min_level` are the only keys core reads**. Everything else
+is handed to that notifier untouched, so `topic` and `webhook_url` above are entirely their own
+business. Credentials do not belong here: put them in `.env` and read them from the `env` argument
+of `from_config`.
 
-`.toml` is gitignored and per-project; `default.toml` is the committed template. Once `.toml`
-exists it is frozen — if it lacks a section that `default.toml` has, you get a warning telling you
-to copy the block to adopt the defaults, or add an empty block to keep current behaviour and
-silence the warning. Reading config never rewrites it.
+`project` identifies the *deployment*, so several of them can share one channel and still be
+distinguishable. `host` already says which machine an event came from; `project` says which project
+on it. Set it when the directory name is not distinctive enough to read in a notification.
+
+**Activation is explicit.** A notifier runs only if `channels` names it, so installing a package
+sends nothing until you wire it up. If a channel is named but not provisioned yet — no token in
+`.env` — it is skipped with a note rather than treated as an error.
+
+`.toml` is gitignored and per-project; `default.toml` is the committed template. If `.toml` does not
+exist it is copied from `default.toml`; once it exists it is yours and is never rewritten. A section
+the template has and your `.toml` lacks produces a warning telling you to copy the block to adopt
+the defaults, or to add an empty block to keep current behaviour and silence the warning.
 
 ### Events
 

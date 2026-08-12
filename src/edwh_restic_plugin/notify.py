@@ -252,7 +252,11 @@ def _hostname() -> str:
 
 
 def _project() -> str:
-    """A label for this deployment: the `project` key of `[restic.notify]`, else the directory."""
+    """Which deployment an event came from, so several of them can share one channel.
+
+    `host` already says which machine; this says which project on it. Set `project` under
+    `[restic.notify]` when the directory name is not distinctive enough to read in a notification.
+    """
     return read_config("notify").get("project") or Path.cwd().name
 
 
