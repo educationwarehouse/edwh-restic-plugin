@@ -3,7 +3,6 @@ import types
 import typing as t
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Self, get_type_hints
 
 import tomlkit
 
@@ -73,7 +72,7 @@ class ResticForgetPolicy:
         return " ".join(args)
 
     @classmethod
-    def from_string(cls, *args: str) -> Self:
+    def from_string(cls, *args: str) -> t.Self:
         """
         Creates a policy instance from a string of restic command line arguments.
 
@@ -88,7 +87,7 @@ class ResticForgetPolicy:
         """
         options = {}
         parsed_args = shlex.split(" ".join(args))
-        type_hints = get_type_hints(cls)
+        type_hints = t.get_type_hints(cls)
 
         iterator = iter(parsed_args)
         for arg in iterator:
@@ -137,7 +136,7 @@ class ResticForgetPolicy:
         return cls(**options)
 
     @classmethod
-    def from_toml_file(cls, subkey: str = "default", toml_path: str | Path | None = None) -> Self | None:
+    def from_toml_file(cls, subkey: str = "default", toml_path: str | Path | None = None) -> t.Self | None:
         """
         Creates a policy instance from a TOML file.
 
@@ -168,7 +167,7 @@ class ResticForgetPolicy:
             return None
 
         policy_dict = {}
-        type_hints = get_type_hints(cls)
+        type_hints = t.get_type_hints(cls)
 
         for key, value in section.items():
             # Convert keys to snake_case
@@ -228,7 +227,7 @@ class ResticForgetPolicy:
     @classmethod
     def get_or_copy_policy(
         cls, subkey: str, toml_path: str | Path | None = None, default_toml_path: str | Path | None = None
-    ) -> Self | None:
+    ) -> t.Self | None:
         """
         Retrieves a policy from the TOML file or copies it from the default TOML file if not present.
 

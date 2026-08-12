@@ -40,6 +40,21 @@ CONTRACT_VERSION = 1
 #: change does not orphan plugins that have not caught up yet.
 MIN_SUPPORTED_CONTRACT = 1
 
+#: One entry point group for both kinds of plugin. Which registry a plugin lands in is decided by
+#: the decorator it uses, not by the group it declares, so an author has one name to remember and
+#: cannot file a repository under notifiers by mistake.
+ENTRY_POINT_GROUP = "edwh_restic_plugin"
+
+#: Modules already imported by entry-point discovery. Both registries read the same group, so
+#: without this the second one would reload a module the first already registered and duplicate it.
+_loaded_entry_points: set[str] = set()
+
+
+def reset_entry_points() -> None:
+    """Forget which entry points were loaded, so the next discover() re-imports them. For tests."""
+    _loaded_entry_points.clear()
+
+
 T = t.TypeVar("T")
 
 
@@ -55,8 +70,6 @@ class Registry(t.Generic[T]):
     Subclasses declare where to look; the mechanics of pushing, aliasing and ordering are shared.
     """
 
-    #: Entry point group external packages declare, e.g. "edwh_restic_plugin.repositories".
-    entry_point_group: str
     #: Dotted package whose *.py modules are imported, or None to skip in-package discovery.
     in_package: str | None = None
     #: Key under [restic.plugins] holding an explicit module list for this registry.
@@ -149,7 +162,11 @@ class Registry(t.Generic[T]):
                 self._import(f"{package}.{file_path.stem}")
 
     def _discover_entry_points(self) -> None:
-        for entry_point in importlib.metadata.entry_points(group=self.entry_point_group):
+        for entry_point in importlib.metadata.entry_points(group=ENTRY_POINT_GROUP):
+            if entry_point.value in _loaded_entry_points:
+                continue
+
+            _loaded_entry_points.add(entry_point.value)
             # The target is imported for its side effects (@register does the work), so the value
             # may be a module or a class; load() covers both.
             try:

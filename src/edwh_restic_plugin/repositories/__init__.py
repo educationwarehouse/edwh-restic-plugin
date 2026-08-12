@@ -373,13 +373,13 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         self.prepare_env_for_restic(c)
 
         if read_data:
-            depth = " --read-data"
+            depth = "--read-data"
         elif subset:
-            depth = f" --read-data-subset={subset}"
+            depth = f"--read-data-subset={subset}"
         else:
             depth = ""
 
-        c.run(f"restic {self.hostarg} -r {self.uri} check{depth}")
+        c.run(f"restic {self.hostarg} -r {self.uri} check {depth}".strip())
 
     def snapshot(self, c: Context, tags: list[str] = None, n: int = 2, verbose: bool = False):
         """
@@ -497,12 +497,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         return False
 
 
-#: Kept as an alias so existing imports keep working; the shape is registry-agnostic now.
-RepositoryRegistration = Registration
-
-
 class RepositoryRegistrations(Registry[Repository]):
-    entry_point_group = "edwh_restic_plugin.repositories"
     in_package = __name__  # this package's *.py files, i.e. local.py, s3.py, ...
     config_key = "repositories"
 
@@ -511,7 +506,7 @@ def register(
     short_name: t.Optional[str] = None,
     aliases: tuple[str, ...] = (),
     priority: int = -1,
-    # **settings: Unpack[RepositoryRegistration] # <- not really supported yet!
+    # **settings: Unpack[Registration] # <- not really supported yet!
 ) -> t.Callable[[t.Type[Repository]], t.Type[Repository]]:
     if isinstance(short_name, type):
         raise SyntaxError("Please call @register() with parentheses!")
@@ -522,7 +517,7 @@ def register(
 
         name_or_derived = short_name or camel_to_snake(cls.__name__).removesuffix("_repository")
 
-        settings: RepositoryRegistration = {
+        settings: Registration = {
             "short_name": name_or_derived,
             "aliases": aliases,
             "priority": priority,

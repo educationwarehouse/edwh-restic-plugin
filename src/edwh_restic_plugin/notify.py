@@ -6,11 +6,13 @@ directly. What is guaranteed is that it cannot affect the backup.
 """
 
 import abc
+import contextlib
 import datetime as dt
 import os
 import platform
 import socket
 import threading
+import time
 import typing as t
 from pathlib import Path
 
@@ -18,8 +20,10 @@ from termcolor import cprint
 
 from .config import read_config
 from .env import DOTENV, read_dotenv
-from .events import BasicEvent, Failed, Level, Slow, Status, Succeeded, level_for, matches
+from .events import BasicEvent, Failed, Level, Slow, Started, Status, Succeeded, level_for, matches
+from .exceptions import ResticError, ResticScriptError
 from .registry import CONTRACT_VERSION, MIN_SUPPORTED_CONTRACT, Registration, Registry
+from .watchdog import Watchdog
 
 if t.TYPE_CHECKING:
     from .repositories import Repository
@@ -41,9 +45,10 @@ class Notifier(abc.ABC):
     _aliases: tuple[str, ...]
     _priority: int
 
-    #: Which contract this notifier was written against. A mismatch is warned about and the
-    #: notifier skipped, at discovery time rather than mid-backup.
-    contract: int = CONTRACT_VERSION
+    #: Which contract version this notifier was written against. Declare it as a literal: reading
+    #: CONTRACT_VERSION would claim compatibility with whatever it happens to be installed beside,
+    #: which is exactly what the check exists to catch.
+    contract: int = 1
 
     #: Default routing, overridden by [restic.notify.<name>] events.
     subscribes: tuple[str, ...] = ("*",)
@@ -56,8 +61,10 @@ class Notifier(abc.ABC):
     ) -> "t.Self | None":
         """Build an instance, or return None to stay inactive.
 
-        `env` is the parsed `.env`; `options` is the resolved `[restic.notify.<name>]` table. Both
-        are passed in so a notifier never has to locate or parse configuration itself.
+        `env` holds only the `.env` keys prefixed with this notifier's name, e.g. NTFY_TOKEN for
+        `ntfy`, with the prefix kept. `options` is the resolved `[restic.notify.<name>]` table. Both
+        are passed in so a notifier never has to locate or parse configuration itself, and so a
+        channel is not handed every other channel's credentials, nor restic's.
 
         Return None when the channel is named but not provisioned yet, e.g. its token is not in
         `.env`. That is reported and skipped, so a half-provisioned machine still runs its backups.
@@ -86,7 +93,6 @@ class Notifier(abc.ABC):
 
 
 class NotifierRegistrations(Registry[Notifier]):
-    entry_point_group = "edwh_restic_plugin.notifiers"
     # No in-package discovery: core ships no notifiers, only the interface.
     in_package = None
     config_key = "notifiers"
@@ -139,6 +145,16 @@ class Channel(t.NamedTuple):
 LEVELS: tuple[Level, ...] = t.get_args(Level)
 
 
+def env_for(name: str, env: t.Mapping[str, str]) -> dict[str, str]:
+    """The `.env` keys belonging to one notifier: those prefixed with its name.
+
+    A notifier can still read os.environ itself; this is not a sandbox. It does mean the obvious
+    path hands `ntfy` only NTFY_*, rather than every other channel's tokens and restic's password.
+    """
+    prefix = f"{name.upper()}_"
+    return {key: value for key, value in env.items() if key.upper().startswith(prefix)}
+
+
 def build_channels(
     env: t.Mapping[str, str] | None = None,
     config: t.Mapping[str, t.Any] | None = None,
@@ -177,7 +193,7 @@ def build_channels(
 
         options = dict(config.get(name) or {}) if config_supplied else read_config("notify", name)
         try:
-            instance = cls.from_config(env, options)
+            instance = cls.from_config(env_for(name, env), options)
         except Exception as e:
             cprint(f"warning: notifier '{name}' failed to configure and was skipped: {e!r}", "yellow")
             continue
@@ -243,8 +259,9 @@ class Dispatcher:
             cprint(f"warning: notifier '{name}' raised {error[0]!r}", "yellow")
 
 
-#: Module-level dispatcher, so the watchdog and the emitters share one lock and one channel list.
-dispatcher = Dispatcher()
+#: Shared by every emitter that is not given one, so the watchdog and the main thread contend for a
+#: single lock and resolve channels once.
+default_dispatcher = Dispatcher()
 
 
 def _hostname() -> str:
@@ -269,13 +286,13 @@ class Emitter:
         repo: "Repository | None",
         repo_name: str,
         fields: dict[str, t.Any],
-        dispatcher_: Dispatcher | None = None,
+        dispatcher: Dispatcher | None = None,
     ) -> None:
         self.event_class = event_class
         self.repo = repo
         self.repo_name = repo_name
         self.fields = fields
-        self.dispatcher = dispatcher_ or dispatcher
+        self.dispatcher = dispatcher or default_dispatcher
         self.started_at: float | None = None
 
     def build(self, status: Status) -> BasicEvent:
@@ -300,14 +317,94 @@ class Emitter:
         self.fields.update(fields)
 
 
+class Operation:
+    """One operation's lifecycle: resolve a repository, report, and watch for a hang.
+
+    Collaborators are constructor arguments rather than module lookups, so a caller (or a test) can
+    supply its own resolver, dispatcher or thresholds without patching anything. `resolve` is
+    required precisely so this module does not have to know how a repository is found.
+    """
+
+    def __init__(
+        self,
+        connection_choice: str | None,
+        event_class: type[BasicEvent],
+        resolve: t.Callable[..., "Repository"],
+        require_restic: bool = False,
+        dispatcher: Dispatcher | None = None,
+        thresholds: t.Sequence[float] | None = None,
+        **fields: t.Any,
+    ) -> None:
+        self.connection_choice = connection_choice
+        self.require_restic = require_restic
+        self.resolve = resolve
+        self.thresholds = thresholds
+        self.fields = dict(fields)
+        self.emitter = Emitter(event_class, None, connection_choice or "default", self.fields, dispatcher)
+
+    @contextlib.contextmanager
+    def run(self) -> t.Iterator["Repository"]:
+        started = time.monotonic()
+
+        def elapsed() -> float:
+            return time.monotonic() - started
+
+        try:
+            repo = self.resolve(self.connection_choice, require_restic=self.require_restic)
+        except Exception as e:
+            # No Repository exists yet, so the event falls back to the choice string. Reporting this
+            # is the point: a mistyped --connection-choice would otherwise kill a cron job silently.
+            self.emitter.emit(Failed(duration=elapsed(), exit_code=_exit_code_of(e), logs=str(e)))
+            raise
+
+        self.emitter.repo = repo
+        self.emitter.repo_name = repo._short_name
+        self.emitter.emit(Started())
+
+        watchdog = Watchdog(self.emitter, target=self.fields.get("target"), thresholds=self.thresholds)
+        watchdog.arm()
+        try:
+            yield repo
+        except Exception as e:
+            self.emitter.emit(Failed(duration=elapsed(), exit_code=_exit_code_of(e), logs=_logs_of(e)))
+            raise
+        else:
+            self.emitter.emit(Succeeded(duration=elapsed()))
+        finally:
+            watchdog.disarm()
+
+
+def _exit_code_of(error: BaseException) -> int:
+    if isinstance(error, ResticError):
+        return error.exit_code
+
+    return 1
+
+
+def _logs_of(error: BaseException) -> str:
+    """Full stdout/stderr where restic gave us any, else the exception text."""
+    if isinstance(error, ResticScriptError):
+        detail = "\n".join(f"{f.script} exited {f.exit_code}" for f in error.failures)
+        return f"{error}\n{detail}"
+
+    if (result := getattr(error, "result", None)) is not None:
+        parts = [getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or ""]
+        if joined := "\n".join(p for p in parts if p):
+            return joined
+
+    return str(error)
+
+
 __all__ = [
     "Channel",
     "Dispatcher",
     "Emitter",
     "Notifier",
     "NotifierRegistrations",
+    "Operation",
     "build_channels",
-    "dispatcher",
+    "default_dispatcher",
+    "env_for",
     "notifiers",
     "register_notifier",
 ]

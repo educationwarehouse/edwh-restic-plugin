@@ -1,11 +1,9 @@
-import contextlib
 import functools
 import json
 import os
 import subprocess
 import sys
 import tempfile
-import time
 import typing as t
 from pathlib import Path
 
@@ -17,24 +15,13 @@ from ewok import Context
 from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
-from .events import (
-    BackupEvent,
-    BasicEvent,
-    CheckEvent,
-    Failed,
-    ForgetEvent,
-    RestoreEvent,
-    Started,
-    Succeeded,
-    WipeEvent,
-)
-from .exceptions import ResticError, ResticScriptError, UnsupportedOperation
+from .events import BackupEvent, BasicEvent, CheckEvent, ForgetEvent, RestoreEvent, WipeEvent
+from .exceptions import ResticError, UnsupportedOperation
 from .forget import ResticForgetPolicy
 from .helpers import _require_restic
-from .notify import Dispatcher, Emitter
+from .notify import Operation
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
-from .watchdog import Watchdog
 
 P = t.ParamSpec("P")
 R = t.TypeVar("R")
@@ -100,100 +87,22 @@ def cli_repo(
     return repo
 
 
-class Operation:
-    """One operation's lifecycle: resolve a repository, report, and watch for a hang.
-
-    Collaborators are constructor arguments rather than module lookups, so a caller (or a test) can
-    supply its own resolver, dispatcher or thresholds without patching anything.
-    """
-
-    def __init__(
-        self,
-        connection_choice: str | None,
-        event_class: type[BasicEvent],
-        require_restic: bool = False,
-        resolve: t.Callable[..., Repository] | None = None,
-        dispatcher: Dispatcher | None = None,
-        thresholds: t.Sequence[float] | None = None,
-        **fields: t.Any,
-    ) -> None:
-        self.connection_choice = connection_choice
-        self.require_restic = require_restic
-        self.resolve = resolve or cli_repo
-        self.thresholds = thresholds
-        self.fields = dict(fields)
-        self.emitter = Emitter(event_class, None, connection_choice or "default", self.fields, dispatcher)
-
-    @contextlib.contextmanager
-    def run(self) -> t.Iterator[Repository]:
-        started = time.monotonic()
-
-        def elapsed() -> float:
-            return time.monotonic() - started
-
-        try:
-            repo = self.resolve(self.connection_choice, require_restic=self.require_restic)
-        except Exception as e:
-            # No Repository exists yet, so the event falls back to the choice string. Reporting this
-            # is the point: a mistyped --connection-choice would otherwise kill a cron job silently.
-            self.emitter.emit(Failed(duration=elapsed(), exit_code=_exit_code_of(e), logs=str(e)))
-            raise
-
-        self.emitter.repo = repo
-        self.emitter.repo_name = repo._short_name
-        self.emitter.emit(Started())
-
-        watchdog = Watchdog(self.emitter, target=self.fields.get("target"), thresholds=self.thresholds)
-        watchdog.arm()
-        try:
-            yield repo
-        except Exception as e:
-            self.emitter.emit(Failed(duration=elapsed(), exit_code=_exit_code_of(e), logs=_logs_of(e)))
-            raise
-        else:
-            self.emitter.emit(Succeeded(duration=elapsed()))
-        finally:
-            watchdog.disarm()
-
-
 def repo_context(
     connection_choice: str | None,
     event_class: type[BasicEvent],
     require_restic: bool = False,
     **fields: t.Any,
 ) -> t.ContextManager[Repository]:
-    """Resolve a repository and report the operation's lifecycle around the block.
+    """Run an operation against a repository, reporting its lifecycle.
 
         with repo_context(connection_choice, BackupEvent, target=target) as repo:
             repo.backup(c, verbose, target, message)
 
     Entering emits `started` and arms the watchdog; leaving disarms it and emits `succeeded` or
-    `failed`, choosing the phase from the exception or its absence.
-
-    The second argument is the operation class, which is all this needs, since phases are universal.
+    `failed`. The second argument is the operation class, which is all this needs since phases are
+    universal.
     """
-    return Operation(connection_choice, event_class, require_restic, **fields).run()
-
-
-def _exit_code_of(error: BaseException) -> int:
-    if isinstance(error, ResticError):
-        return error.exit_code
-
-    return 1
-
-
-def _logs_of(error: BaseException) -> str:
-    """Full stdout/stderr where restic gave us any, else the exception text."""
-    if isinstance(error, ResticScriptError):
-        detail = "\n".join(f"{f.script} exited {f.exit_code}" for f in error.failures)
-        return f"{error}\n{detail}"
-
-    if (result := getattr(error, "result", None)) is not None:
-        parts = [getattr(result, "stdout", "") or "", getattr(result, "stderr", "") or ""]
-        if joined := "\n".join(p for p in parts if p):
-            return joined
-
-    return str(error)
+    return Operation(connection_choice, event_class, cli_repo, require_restic, **fields).run()
 
 
 @task

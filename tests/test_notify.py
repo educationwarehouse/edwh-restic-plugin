@@ -123,7 +123,7 @@ def test_returning_none_from_from_config_stays_inactive(capsys):
     class Unprovisioned(Notifier):
         @classmethod
         def from_config(cls, _env, _options):
-            return None if not _env.get("TOKEN") else cls()
+            return None if not _env.get("UNPROVISIONED_TOKEN") else cls()
 
         def send(self, _event):
             pass
@@ -131,7 +131,7 @@ def test_returning_none_from_from_config_stays_inactive(capsys):
     assert build_channels(env={}, config={"channels": ["unprovisioned"]}) == []
     assert "not configured yet" in capsys.readouterr().out
 
-    assert len(build_channels(env={"TOKEN": "x"}, config={"channels": ["unprovisioned"]})) == 1
+    assert len(build_channels(env={"UNPROVISIONED_TOKEN": "x"}, config={"channels": ["unprovisioned"]})) == 1
 
 
 def test_a_notifier_that_raises_during_configure_is_skipped(capsys):
@@ -380,3 +380,33 @@ def test_emitter_uses_display_name_not_the_uri():
     event = notifier.received[0]
     assert event.repo_display == "sftp:backups"
     assert "hunter2" not in repr(event)
+
+
+# --- env is namespaced per channel ----------------------------------------------------------
+
+
+def test_a_channel_only_sees_its_own_env_keys():
+    """So one channel is not handed another's token, nor restic's password."""
+    seen = {}
+
+    @register_notifier("scoped")
+    class Scoped(Notifier):
+        @classmethod
+        def from_config(cls, env, _options):
+            seen.update(env)
+            return cls()
+
+        def send(self, _event):
+            pass
+
+    build_channels(
+        env={
+            "SCOPED_TOKEN": "mine",
+            "SCOPED_URL": "https://mine",
+            "OTHER_TOKEN": "not mine",
+            "RESTIC_PASSWORD": "definitely not mine",
+        },
+        config={"channels": ["scoped"]},
+    )
+
+    assert seen == {"SCOPED_TOKEN": "mine", "SCOPED_URL": "https://mine"}
