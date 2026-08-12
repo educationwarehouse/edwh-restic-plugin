@@ -1,38 +1,34 @@
 """
 Detecting operations that hang.
 
-An operation that hangs fires neither `succeeded` nor `failed`. It is invisible to every notifier
--- a third state, not a variant of failure. The main thread is blocked in `c.run(..., pty=True)`,
-so a daemon timer thread is the right primitive: no async, no subprocess supervision.
+An operation that hangs fires neither `succeeded` nor `failed`, so it is invisible to every
+notifier: a third state, not a variant of failure. The main thread is blocked in
+`c.run(..., pty=True)`, so a daemon timer thread is the right primitive.
 
-**It does not kill anything.** Killing restic mid-write risks leaving a stale repository lock,
-which is why `edwh restic.unlock` exists; a watchdog that routinely creates work for that task is
-a net loss. A hard kill belongs behind a separate, explicitly named option, and invoke's
-`run(timeout=)` already provides the mechanism.
+It does not kill anything: killing restic mid-write risks leaving a stale repository lock, which is
+what `edwh restic.unlock` exists to clean up.
 
-Known limit, and why a heartbeat is a separate feature: this lives inside the process. If the
-machine reboots, the container is evicted, or cron never fired, the watchdog dies with everything
-else and nothing is sent. The complement is an external monitor that alarms on *silence*. The
-watchdog catches "running too long"; a heartbeat catches "never ran". Neither covers the other.
+It also lives inside the process, so a reboot or a cron job that never fired sends nothing. The
+complement is an external monitor alarming on silence; this catches "running too long", a heartbeat
+catches "never ran".
 """
 
 import threading
 import time
-import typing
+import typing as t
 
 from .config import read_config
 from .events import Slow
 
-if typing.TYPE_CHECKING:
+if t.TYPE_CHECKING:
     from .notify import Emitter
 
-#: Escalating rather than a single shot, because "slow" and "certainly wedged" deserve different
-#: levels. The event's level rises with each step -- see Watchdog._fire.
+#: Escalating rather than a single shot, because "slow" and "certainly wedged" differ in kind.
 DEFAULT_THRESHOLDS = ("30m", "2h")
 
 
 def parse_duration(text: str | int | float) -> float:
-    """Accept 30, "30", "30s", "30m", "2h", "1d" -- bare numbers are seconds."""
+    """Accept 30, "30", "30s", "30m", "2h" or "1d". Bare numbers are seconds."""
     if isinstance(text, int | float):
         return float(text)
 
@@ -45,7 +41,7 @@ def parse_duration(text: str | int | float) -> float:
     return float(value)
 
 
-def thresholds_for(target: str | None, config: typing.Mapping[str, typing.Any] | None = None) -> list[float]:
+def thresholds_for(target: str | None, config: t.Mapping[str, t.Any] | None = None) -> list[float]:
     """Resolve warn_after, preferring a per-target override.
 
     Per-target matters because backup_files_* and backup_stream_* have wildly different expected
@@ -54,7 +50,7 @@ def thresholds_for(target: str | None, config: typing.Mapping[str, typing.Any] |
     """
     config = read_config("notify") if config is None else config
 
-    raw: typing.Any = config.get("warn_after", DEFAULT_THRESHOLDS)
+    raw: t.Any = config.get("warn_after", DEFAULT_THRESHOLDS)
     if target:
         targets = config.get("targets") or {}
         if isinstance(targets, dict) and isinstance(targets.get(target), dict):
@@ -76,7 +72,7 @@ class Watchdog:
         self,
         emitter: "Emitter",
         target: str | None = None,
-        thresholds: typing.Sequence[float] | None = None,
+        thresholds: t.Sequence[float] | None = None,
     ) -> None:
         self.emitter = emitter
         self.thresholds = list(thresholds) if thresholds is not None else thresholds_for(target)

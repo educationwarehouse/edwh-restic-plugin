@@ -1,16 +1,17 @@
 """
 Exceptions raised deliberately by this plugin.
 
-Library code must never call sys.exit() or exit(): a bare process exit prevents any
-except/finally in a caller from running, which makes failure reporting impossible. Raise one of
-these instead and let the task layer turn it into a process exit code.
+Library code must never call sys.exit() or exit(): a bare process exit prevents any except or
+finally in a caller from running, which makes failure reporting impossible. Raise one of these
+instead and let the task layer turn it into a process exit code.
 """
 
-import dataclasses
-import typing
+import dataclasses as dc
+import typing as t
+from pathlib import Path
 
 
-@dataclasses.dataclass(frozen=True)
+@dc.dataclass(frozen=True)
 class ScriptFailure:
     """A single captain-hooks script that exited non-zero."""
 
@@ -21,7 +22,7 @@ class ScriptFailure:
 class ResticError(Exception):
     """Base for every failure this plugin raises on purpose.
 
-    exit_code is what the task layer passes to sys.exit(), so it stays compatible with the
+    `exit_code` is what the task layer passes to sys.exit(), so it stays compatible with the
     process exit codes this plugin produced before these exceptions existed.
     """
 
@@ -33,7 +34,7 @@ class NoScriptsFound(ResticError):
 
     exit_code = 255
 
-    def __init__(self, verb: str, target: str, folder: "typing.Any") -> None:
+    def __init__(self, verb: str, target: str, folder: Path) -> None:
         self.verb = verb
         self.target = target
         self.folder = folder
@@ -43,7 +44,7 @@ class NoScriptsFound(ResticError):
 class ResticScriptError(ResticError):
     """One or more captain-hooks scripts exited non-zero."""
 
-    def __init__(self, failures: "typing.Iterable[ScriptFailure]") -> None:
+    def __init__(self, failures: t.Iterable[ScriptFailure]) -> None:
         self.failures = tuple(failures)
         if not self.failures:
             raise ValueError("ResticScriptError requires at least one failure")
@@ -61,10 +62,9 @@ class ResticConnectionError(ResticError):
 class UnsupportedOperation(ResticError):
     """This repository type does not implement the requested operation.
 
-    Not every backend can do everything -- `wipe` and `move` need provider-specific bucket and
-    rclone support that a plain restic target does not have. Declaring those abstract would make
-    every third-party repository implement three methods it does not need just to be
-    instantiable, so they degrade at the point of use instead.
+    `wipe` and `move` need provider-specific bucket and rclone support that a plain restic target
+    does not have. Declaring those abstract would make every third-party repository implement three
+    methods it does not need just to be instantiable, so they degrade at the point of use instead.
     """
 
     def __init__(self, repository: str, operation: str) -> None:

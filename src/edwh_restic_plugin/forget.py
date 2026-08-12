@@ -1,8 +1,9 @@
 import shlex
-import typing
+import types
+import typing as t
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Self, get_type_hints
+from typing import Self, get_type_hints
 
 import tomlkit
 
@@ -13,35 +14,35 @@ class ResticForgetPolicy:
     Represents a policy for forgetting backups using restic, with various retention options.
 
     Attributes:
-        keep_last (Optional[int]): Number of latest snapshots to keep.
-        keep_hourly (Optional[int]): Number of hourly snapshots to keep.
-        keep_daily (Optional[int]): Number of daily snapshots to keep.
-        keep_weekly (Optional[int]): Number of weekly snapshots to keep.
-        keep_monthly (Optional[int]): Number of monthly snapshots to keep.
-        keep_yearly (Optional[int]): Number of yearly snapshots to keep.
+        keep_last (int | None): Number of latest snapshots to keep.
+        keep_hourly (int | None): Number of hourly snapshots to keep.
+        keep_daily (int | None): Number of daily snapshots to keep.
+        keep_weekly (int | None): Number of weekly snapshots to keep.
+        keep_monthly (int | None): Number of monthly snapshots to keep.
+        keep_yearly (int | None): Number of yearly snapshots to keep.
         keep_tag (list[str]): List of tags for which to apply the retention policy.
-        keep_within (Optional[str]): Retention period within which to keep snapshots.
-        keep_within_hourly (Optional[str]): Hourly retention period within which to keep snapshots.
-        keep_within_daily (Optional[str]): Daily retention period within which to keep snapshots.
-        keep_within_weekly (Optional[str]): Weekly retention period within which to keep snapshots.
-        keep_within_monthly (Optional[str]): Monthly retention period within which to keep snapshots.
-        keep_within_yearly (Optional[str]): Yearly retention period within which to keep snapshots.
+        keep_within (str | None): Retention period within which to keep snapshots.
+        keep_within_hourly (str | None): Hourly retention period within which to keep snapshots.
+        keep_within_daily (str | None): Daily retention period within which to keep snapshots.
+        keep_within_weekly (str | None): Weekly retention period within which to keep snapshots.
+        keep_within_monthly (str | None): Monthly retention period within which to keep snapshots.
+        keep_within_yearly (str | None): Yearly retention period within which to keep snapshots.
         prune (bool): Whether to purge old snapshots. Default is True.
     """
 
-    keep_last: Optional[int] = None
-    keep_hourly: Optional[int] = None
-    keep_daily: Optional[int] = None
-    keep_weekly: Optional[int] = None
-    keep_monthly: Optional[int] = None
-    keep_yearly: Optional[int] = None
+    keep_last: int | None = None
+    keep_hourly: int | None = None
+    keep_daily: int | None = None
+    keep_weekly: int | None = None
+    keep_monthly: int | None = None
+    keep_yearly: int | None = None
     keep_tag: list[str] = field(default_factory=list)
-    keep_within: Optional[str] = None
-    keep_within_hourly: Optional[str] = None
-    keep_within_daily: Optional[str] = None
-    keep_within_weekly: Optional[str] = None
-    keep_within_monthly: Optional[str] = None
-    keep_within_yearly: Optional[str] = None
+    keep_within: str | None = None
+    keep_within_hourly: str | None = None
+    keep_within_daily: str | None = None
+    keep_within_weekly: str | None = None
+    keep_within_monthly: str | None = None
+    keep_within_yearly: str | None = None
     prune: bool = False
     dry_run: bool = False
 
@@ -120,11 +121,12 @@ class ResticForgetPolicy:
                 key = key.replace("-", "_")
                 attr_type = type_hints.get(key, str)
 
-                # Determine if the attribute type is an integer or optional integer
-                origin = typing.get_origin(attr_type)
-                if origin is typing.Union:
-                    if int in typing.get_args(attr_type):
-                        options[key] = int(value)
+                # Coerce to int where the annotation allows one, else keep the string. The union
+                # branch used to store nothing at all when int was not among the args, which
+                # silently dropped every `str | None` option such as --keep-within.
+                origin = t.get_origin(attr_type)
+                if origin in (t.Union, types.UnionType):
+                    options[key] = int(value) if int in t.get_args(attr_type) else value
                 elif origin is list:
                     options.setdefault(key, []).append(value)
                 elif attr_type is int:
@@ -135,13 +137,13 @@ class ResticForgetPolicy:
         return cls(**options)
 
     @classmethod
-    def from_toml_file(cls, subkey: str = "default", toml_path: Optional[str | Path] = None) -> Optional[Self]:
+    def from_toml_file(cls, subkey: str = "default", toml_path: str | Path | None = None) -> Self | None:
         """
         Creates a policy instance from a TOML file.
 
         Args:
             subkey (str): The key under which the policy is stored in the TOML file.
-            toml_path (Optional[str | Path]): The path to the TOML configuration file. Defaults to '.toml' in the current directory.
+            toml_path (str | Path | None): The path to the TOML configuration file. Defaults to '.toml' in the current directory.
 
         Returns:
             ResticForgetPolicy: An instance of ResticForgetPolicy created from the provided TOML file and key, or None if not found.
@@ -225,15 +227,15 @@ class ResticForgetPolicy:
 
     @classmethod
     def get_or_copy_policy(
-        cls, subkey: str, toml_path: Optional[str | Path] = None, default_toml_path: Optional[str | Path] = None
-    ) -> Optional[Self]:
+        cls, subkey: str, toml_path: str | Path | None = None, default_toml_path: str | Path | None = None
+    ) -> Self | None:
         """
         Retrieves a policy from the TOML file or copies it from the default TOML file if not present.
 
         Args:
             subkey (str): The key under which the policy is stored in the TOML file.
-            toml_path (Optional[str | Path]): The path to the TOML configuration file. Defaults to '.toml' in the current directory.
-            default_toml_path (Optional[str | Path]): The path to the default TOML configuration file. Defaults to 'default.toml' in the same directory as toml_path.
+            toml_path (str | Path | None): The path to the TOML configuration file. Defaults to '.toml' in the current directory.
+            default_toml_path (str | Path | None): The path to the default TOML configuration file. Defaults to 'default.toml' in the same directory as toml_path.
 
         Returns:
             ResticForgetPolicy: An instance of ResticForgetPolicy created from the provided TOML file and key,

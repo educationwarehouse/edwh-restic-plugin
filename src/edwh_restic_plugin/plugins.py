@@ -2,7 +2,7 @@
 The one import path a plugin should depend on.
 
 Everything a repository or notifier author needs is re-exported here, so a plugin never reaches
-into `.events`, `.notify` or `.repositories` internals -- those are free to move, this is not.
+into `.events`, `.notify` or `.repositories` internals. Those are free to move; this is not.
 
     from edwh_restic_plugin.plugins import CONTRACT_VERSION, Notifier, register_notifier
 

@@ -6,6 +6,7 @@ import pytest
 
 from src.edwh_restic_plugin.events import (
     ALL_PHASES,
+    Phase,
     BackupEvent,
     BasicEvent,
     CheckEvent,
@@ -81,12 +82,17 @@ def test_name_is_derived_from_operation_and_phase():
     assert make(ForgetEvent, Succeeded(duration=2.0)).name == "forget.succeeded"
 
 
-def test_level_is_not_derivable_from_phase_alone():
-    """wipe.succeeded is a warning while backup.succeeded is info."""
-    assert level_for("backup", "succeeded") == "info"
-    assert level_for("wipe", "succeeded") == "warning"
-    assert level_for("backup", "failed") == "error"
-    assert level_for("backup", "slow") == "warning"
+def test_level_follows_the_phase():
+    """Uniform across operations: no operation gets a special level."""
+    assert level_for("started") == "info"
+    assert level_for("succeeded") == "info"
+    assert level_for("failed") == "error"
+    assert level_for("slow") == "warning"
+
+
+def test_all_phases_is_derived_from_the_literal():
+    """So the tuple cannot drift from the type."""
+    assert set(ALL_PHASES) == set(typing.get_args(Phase))
 
 
 @pytest.mark.parametrize(

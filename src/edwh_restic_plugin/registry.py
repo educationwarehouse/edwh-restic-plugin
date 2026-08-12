@@ -21,7 +21,7 @@ import importlib
 import importlib.metadata
 import importlib.util
 import sys
-import typing
+import typing as t
 from collections import OrderedDict
 from pathlib import Path
 
@@ -31,21 +31,25 @@ from typing_extensions import NotRequired
 from .config import read_config
 
 
-#: Bumped when a change breaks a plugin at runtime: a removed or renamed field, a changed
-#: method signature, a member dropped from the Event union. Adding an event operation does not
-#: bump it -- see docs/plugins-architecture.md section 7.2.
+#: Bumped when a change breaks a plugin at runtime: a removed or renamed field, a changed method
+#: signature, a member dropped from the Event union. Adding an event operation does not bump it.
 CONTRACT_VERSION = 1
 
-T = typing.TypeVar("T")
+#: Oldest contract still accepted. A notifier declaring anything in
+#: [MIN_SUPPORTED_CONTRACT, CONTRACT_VERSION] is loaded, so raising CONTRACT_VERSION for an additive
+#: change does not orphan plugins that have not caught up yet.
+MIN_SUPPORTED_CONTRACT = 1
+
+T = t.TypeVar("T")
 
 
-class Registration(typing.TypedDict):
+class Registration(t.TypedDict):
     short_name: str
     aliases: NotRequired[tuple[str, ...]]
     priority: NotRequired[int]
 
 
-class Registry(typing.Generic[T]):
+class Registry(t.Generic[T]):
     """A priority-ordered plugin registry with lazy, scoped discovery.
 
     Subclasses declare where to look; the mechanics of pushing, aliasing and ordering are shared.
@@ -64,11 +68,8 @@ class Registry(typing.Generic[T]):
         # aliases stores a reference for each name to the plugin class
         self._aliases: dict[str, type[T]] = {}
         self._discovered = False
-        # Tie-breaker, so heapq never has to compare the plugin classes themselves. Repository can
-        # be compared (SortableMeta defines __lt__/__gt__ for exactly this reason) but nothing else
-        # can, and requiring every future plugin base to carry that metaclass would be a trap.
-        # A counter also makes equal priorities resolve in registration order rather than
-        # arbitrarily.
+        # Tie-breaker, so heapq never has to compare the plugin classes themselves, and so equal
+        # priorities resolve in registration order rather than arbitrarily.
         self._counter = 0
 
     def push(self, plugin: type[T], settings: Registration) -> None:
@@ -95,9 +96,8 @@ class Registry(typing.Generic[T]):
         self._discovered = False
 
     def get(self, name: str) -> type[T] | None:
-        # NB: discover first. _aliases is only filled by push(), which only runs during
-        # discovery, so reading _aliases directly returns None for a correctly registered plugin
-        # unless some earlier call happened to trigger discovery.
+        # NB: discover first. _aliases is only filled by push(), which only runs during discovery,
+        # so reading it directly returns None for a correctly registered plugin.
         if not self._discovered:
             self.discover()
         return self._aliases.get(name)
@@ -112,7 +112,7 @@ class Registry(typing.Generic[T]):
             ordered_dict[settings["short_name"]] = item
         return ordered_dict
 
-    def __iter__(self) -> typing.Generator[type[T], None, None]:
+    def __iter__(self) -> t.Generator[type[T], None, None]:
         return (entry[2] for entry in self.queue)
 
     def __bool__(self) -> bool:
@@ -120,7 +120,6 @@ class Registry(typing.Generic[T]):
 
     def discover(
         self,
-        *,
         in_package: bool = True,
         entry_points: bool = True,
         config: bool = True,
@@ -140,7 +139,7 @@ class Registry(typing.Generic[T]):
             self._discover_from_config()
 
     def _discover_in_package(self) -> None:
-        package = typing.cast(str, self.in_package)
+        package = t.cast(str, self.in_package)
         spec = importlib.util.find_spec(package)
         if not spec or not spec.origin:
             return
@@ -151,8 +150,8 @@ class Registry(typing.Generic[T]):
 
     def _discover_entry_points(self) -> None:
         for entry_point in importlib.metadata.entry_points(group=self.entry_point_group):
-            # The target is imported for its side effects -- @register does the work -- so the
-            # value may be a module or a class; load() covers both.
+            # The target is imported for its side effects (@register does the work), so the value
+            # may be a module or a class; load() covers both.
             try:
                 entry_point.load()
             except Exception as e:
@@ -169,9 +168,9 @@ class Registry(typing.Generic[T]):
     def _import(self, module: str) -> None:
         try:
             if existing := sys.modules.get(module):
-                # A plain import_module is a no-op for an already-imported module, so @register
-                # would not run and a clear() + discover() cycle would silently register nothing.
-                # Reloading re-executes the decorators, which is what makes rediscovery idempotent.
+                # import_module is a no-op for an already-imported module, so @register would not
+                # run and a clear() + discover() cycle would register nothing. Reloading re-executes
+                # the decorators, which is what makes rediscovery idempotent.
                 importlib.reload(existing)
             else:
                 importlib.import_module(module)

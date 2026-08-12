@@ -1,13 +1,13 @@
 import sys
-import typing
+import typing as t
 
 import invoke
 from edwh.tasks import require_sudo
 
-T = typing.TypeVar("T")
+T = t.TypeVar("T")
 
 
-def fix_tags(tags: typing.Iterable[T | None]) -> list[T]:
+def fix_tags(tags: t.Iterable[T | None]) -> list[T]:
     """
     Removes all None type elements from the input list.
 

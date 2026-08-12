@@ -5,7 +5,7 @@ import io
 import os
 import re
 import sys
-import typing
+import typing as t
 from collections import defaultdict
 from pathlib import Path
 
@@ -21,7 +21,7 @@ from ..forget import ResticForgetPolicy
 from ..helpers import _require_restic, camel_to_snake, fix_tags
 from ..registry import Registration, Registry
 
-if typing.TYPE_CHECKING:
+if t.TYPE_CHECKING:
     from restic_reaper import WipeOutcome
 
 # the path where the restic command is going to be executed
@@ -36,10 +36,10 @@ class SortableMeta(abc.ABCMeta):
     The class can then be included simply for lookup, not for any sorting purposes.
     """
 
-    def __lt__(self, other: typing.Any) -> bool:
+    def __lt__(self, other: t.Any) -> bool:
         return False
 
-    def __gt__(self, other: typing.Any) -> bool:
+    def __gt__(self, other: t.Any) -> bool:
         return False
 
 
@@ -86,29 +86,23 @@ class Repository(abc.ABC, metaclass=SortableMeta):
     # `wipe` and `move` for your backend #
     #####################################
 
-    # These three used to be abstract, which meant a third-party repository had to implement all
-    # six members to be instantiable -- three of them only so that two tasks it may never use
-    # could work. They degrade at the point of use instead: `wipe` and `move` catch
-    # UnsupportedOperation and say so.
+    # Only setup, prepare_for_restic and uri are needed to perform a backup. These three exist for
+    # the `wipe` and `move` tasks, so they degrade at the point of use rather than forcing every
+    # third-party repository to implement operations it may never need.
 
-    def wipe(self, dry: bool = False) -> "WipeOutcome":  # noqa: ARG002 -- signature is the contract
-        raise UnsupportedOperation(self._short_name, "wipe")
+    def wipe(self, dry: bool = False) -> "WipeOutcome":  # noqa: ARG002 (signature is the contract)
+        raise UnsupportedOperation(self.display_name, "wipe")
 
     @property
     def bucket(self) -> str:
-        raise UnsupportedOperation(self._short_name, "bucket (needed by move)")
+        raise UnsupportedOperation(self.display_name, "bucket (needed by move)")
 
     def prepare_rclone_config(self) -> str:
-        raise UnsupportedOperation(self._short_name, "move (no rclone config)")
+        raise UnsupportedOperation(self.display_name, "move (no rclone config)")
 
+    @property
     def display_name(self) -> str:
-        """A human-readable identifier safe to put in a notification.
-
-        `uri` cannot serve: sftp, swift and b2 build host strings that can embed credentials, and
-        a notification may go to Discord. The default discloses only the registered short name, so
-        a repository that ignores this method leaks nothing -- override it to add something
-        informative but safe, e.g. f"s3:{self.bucket}".
-        """
+        """Identifier safe to put in a notification; override to add detail, never returning `uri`."""
         return self._short_name
 
     def _add_missing_boilerpalte_restic_vars(self):
@@ -156,10 +150,8 @@ class Repository(abc.ABC, metaclass=SortableMeta):
     def _require_restic(self):
         """Install restic if it is missing. May prompt for sudo, so callers opt in.
 
-        Deliberately not called from __init__: constructing a repository would then be able to
-        prompt for a password and apt-install a package, on every code path that touches one --
-        including read-only ones like the `env` task. Callers that genuinely need restic present
-        ask for it, via cli_repo(require_restic=True).
+        Deliberately not called from __init__, which would let merely constructing a repository
+        prompt for a password and install a package. Ask for it via cli_repo(require_restic=True).
         """
         _require_restic()
 
@@ -347,7 +339,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         ]:
             raise ResticScriptError(failures)
 
-    def backup(self, c, verbose: bool, target: str, message: str | None):
+    def backup(self, c: Context, verbose: bool, target: str, message: str | None):
         """
         Backs up the specified target.
 
@@ -359,7 +351,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         """
         self.execute_files(c, target, "backup", verbose, message)
 
-    def restore(self, c, verbose: bool, target: str, snapshot: str = "latest"):
+    def restore(self, c: Context, verbose: bool, target: str, snapshot: str = "latest"):
         """
         Restores the specified target using the specified snapshot or the latest if None is given.
 
@@ -372,14 +364,10 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         self.execute_files(c, target, "restore", verbose, snapshot=snapshot)
 
     def check(self, c: Context, read_data: bool = False, subset: str = "") -> None:
-        """Check the integrity of the backup repository.
-
-        Structure only by default. This used to hardcode --read-data, which re-downloads the whole
-        repository -- defensible for a hand-run check, expensive as a scheduled one. Nothing called
-        this method, so changing the default broke no caller.
+        """Check the integrity of the backup repository. Structure only unless asked for more.
 
         Args:
-            read_data: read and verify every pack file.
+            read_data: read and verify every pack file. Thorough, but re-downloads everything.
             subset: read a subset only, e.g. "5%", "1G" or "2/8". Ignored when read_data is set.
         """
         self.prepare_env_for_restic(c)
@@ -461,7 +449,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         print(stdout)
 
-    def determine_forget_policy(self) -> typing.Optional[ResticForgetPolicy]:
+    def determine_forget_policy(self) -> t.Optional[ResticForgetPolicy]:
         for option in (
             self._short_name,
             *self._aliases,
@@ -472,7 +460,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         return None
 
-    def forget(self, c: Context, policy: typing.Optional[ResticForgetPolicy] = None, dry: bool = False) -> None:
+    def forget(self, c: Context, policy: t.Optional[ResticForgetPolicy] = None, dry: bool = False) -> None:
         """
         Prepare environment and execute restic forget command.
 
@@ -520,15 +508,15 @@ class RepositoryRegistrations(Registry[Repository]):
 
 
 def register(
-    short_name: typing.Optional[str] = None,
+    short_name: t.Optional[str] = None,
     aliases: tuple[str, ...] = (),
     priority: int = -1,
     # **settings: Unpack[RepositoryRegistration] # <- not really supported yet!
-) -> typing.Callable[[typing.Type[Repository]], typing.Type[Repository]]:
+) -> t.Callable[[t.Type[Repository]], t.Type[Repository]]:
     if isinstance(short_name, type):
         raise SyntaxError("Please call @register() with parentheses!")
 
-    def wraps(cls: typing.Type[Repository]) -> typing.Type[Repository]:
+    def wraps(cls: t.Type[Repository]) -> t.Type[Repository]:
         if not (isinstance(cls, type) and issubclass(cls, Repository)):
             raise TypeError(f"Decorated class {cls} must be a subclass of Repository!")
 

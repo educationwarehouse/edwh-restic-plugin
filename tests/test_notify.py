@@ -20,7 +20,7 @@ from src.edwh_restic_plugin.notify import (
     notifiers,
     register_notifier,
 )
-from src.edwh_restic_plugin.plugins import CONTRACT_VERSION
+from src.edwh_restic_plugin.registry import CONTRACT_VERSION, MIN_SUPPORTED_CONTRACT
 
 
 @pytest.fixture(autouse=True)
@@ -148,18 +148,43 @@ def test_a_notifier_that_raises_during_configure_is_skipped(capsys):
     assert "failed to configure" in capsys.readouterr().out
 
 
-def test_a_stale_contract_is_skipped_at_resolution_time(capsys):
-    """Not mid-backup: an AttributeError at 04:00 in cron is a bad way to learn this."""
+def test_a_contract_outside_the_supported_range_is_skipped(capsys):
+    """Checked here, not mid-backup: an AttributeError at 04:00 in cron is a bad way to learn it."""
 
-    @register_notifier("stale")
-    class Stale(Notifier):
+    @register_notifier("too_new")
+    class TooNew(Notifier):
         contract = CONTRACT_VERSION + 1
 
         def send(self, _event):
             pass
 
-    assert build_channels(env={}, config={"channels": ["stale"]}) == []
-    assert "was built for contract" in capsys.readouterr().out
+    assert build_channels(env={}, config={"channels": ["too_new"]}) == []
+    assert "outside the supported range" in capsys.readouterr().out
+
+
+def test_an_older_but_still_supported_contract_is_accepted():
+    """A notifier need not track every additive bump to keep working."""
+
+    @register_notifier("older")
+    class Older(Notifier):
+        contract = MIN_SUPPORTED_CONTRACT
+
+        def send(self, _event):
+            pass
+
+    assert len(build_channels(env={}, config={"channels": ["older"]})) == 1
+
+
+def test_a_contract_below_the_floor_is_skipped(capsys):
+    @register_notifier("ancient")
+    class Ancient(Notifier):
+        contract = MIN_SUPPORTED_CONTRACT - 1
+
+        def send(self, _event):
+            pass
+
+    assert build_channels(env={}, config={"channels": ["ancient"]}) == []
+    assert "outside the supported range" in capsys.readouterr().out
 
 
 # --- routing --------------------------------------------------------------------------------
@@ -272,6 +297,15 @@ def test_one_broken_channel_does_not_block_the_others():
 # --- the default format covers every phase --------------------------------------------------
 
 
+class _Concrete(Notifier):
+    """Notifier is abstract, so exercising the inherited format() needs a concrete subclass."""
+
+    _short_name = "concrete"
+
+    def send(self, _event):
+        pass
+
+
 @pytest.mark.parametrize(
     "status",
     [
@@ -282,7 +316,7 @@ def test_one_broken_channel_does_not_block_the_others():
     ],
 )
 def test_default_format_handles_every_phase(status):
-    rendered = Notifier().format(make(BackupEvent, status))
+    rendered = _Concrete().format(make(BackupEvent, status))
 
     assert "s3:acme" in rendered
     assert status.phase in rendered
@@ -329,6 +363,7 @@ def test_emitter_uses_display_name_not_the_uri():
     class FakeRepo:
         _short_name = "sftp"
 
+        @property
         def display_name(self):
             return "sftp:backups"
 

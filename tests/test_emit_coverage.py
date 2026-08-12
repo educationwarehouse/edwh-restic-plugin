@@ -48,10 +48,10 @@ def test_every_emit_site_uses_a_real_operation():
     assert emitted - declared == set(), f"emitted but not a registered operation: {emitted - declared}"
 
 
-def test_repo_context_can_produce_every_phase():
-    """Coverage is structural: repo_context emits started/succeeded/failed and arms the watchdog
+def test_the_lifecycle_can_produce_every_phase():
+    """Coverage is structural: Operation.run emits started/succeeded/failed and arms the watchdog
     for slow, so any operation it is given reaches all four phases."""
-    source = inspect.getsource(tasks.repo_context)
+    source = inspect.getsource(tasks.Operation.run)
 
     assert "Started()" in source
     assert "Succeeded(" in source

@@ -6,7 +6,7 @@ import subprocess
 import sys
 import tempfile
 import time
-import typing
+import typing as t
 from pathlib import Path
 
 import edwh.tasks
@@ -31,25 +31,25 @@ from .events import (
 from .exceptions import ResticError, ResticScriptError, UnsupportedOperation
 from .forget import ResticForgetPolicy
 from .helpers import _require_restic
-from .notify import Emitter
+from .notify import Dispatcher, Emitter
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
 from .watchdog import Watchdog
 
-P = typing.ParamSpec("P")
-R = typing.TypeVar("R")
+P = t.ParamSpec("P")
+R = t.TypeVar("R")
 
 
-def exits_on_restic_error(fn: "typing.Callable[P, R]") -> "typing.Callable[P, R]":
+def exits_on_restic_error(fn: t.Callable[P, R]) -> t.Callable[P, R]:
     """Turn a ResticError into a process exit code, at the outermost point that can.
 
-    Library code raises instead of calling sys.exit() so that callers can react to a failure --
-    print it, notify about it, clean up after it. Something still has to produce the exit code
-    the CLI contract promises, and a task is the only place that knows the process is ending.
+    Library code raises instead of calling sys.exit(), so callers can react to a failure: print
+    it, notify about it, clean up after it. Something still has to produce the exit code the CLI
+    contract promises, and a task is the only place that knows the process is ending.
     """
 
     @functools.wraps(fn)
-    def wrapper(*args: "P.args", **kwargs: "P.kwargs") -> "R":
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
             return fn(*args, **kwargs)
         except ResticError as e:
@@ -100,56 +100,79 @@ def cli_repo(
     return repo
 
 
-@contextlib.contextmanager
+class Operation:
+    """One operation's lifecycle: resolve a repository, report, and watch for a hang.
+
+    Collaborators are constructor arguments rather than module lookups, so a caller (or a test) can
+    supply its own resolver, dispatcher or thresholds without patching anything.
+    """
+
+    def __init__(
+        self,
+        connection_choice: str | None,
+        event_class: type[BasicEvent],
+        require_restic: bool = False,
+        resolve: t.Callable[..., Repository] | None = None,
+        dispatcher: Dispatcher | None = None,
+        thresholds: t.Sequence[float] | None = None,
+        **fields: t.Any,
+    ) -> None:
+        self.connection_choice = connection_choice
+        self.require_restic = require_restic
+        self.resolve = resolve or cli_repo
+        self.thresholds = thresholds
+        self.fields = dict(fields)
+        self.emitter = Emitter(event_class, None, connection_choice or "default", self.fields, dispatcher)
+
+    @contextlib.contextmanager
+    def run(self) -> t.Iterator[Repository]:
+        started = time.monotonic()
+
+        def elapsed() -> float:
+            return time.monotonic() - started
+
+        try:
+            repo = self.resolve(self.connection_choice, require_restic=self.require_restic)
+        except Exception as e:
+            # No Repository exists yet, so the event falls back to the choice string. Reporting this
+            # is the point: a mistyped --connection-choice would otherwise kill a cron job silently.
+            self.emitter.emit(Failed(duration=elapsed(), exit_code=_exit_code_of(e), logs=str(e)))
+            raise
+
+        self.emitter.repo = repo
+        self.emitter.repo_name = repo._short_name
+        self.emitter.emit(Started())
+
+        watchdog = Watchdog(self.emitter, target=self.fields.get("target"), thresholds=self.thresholds)
+        watchdog.arm()
+        try:
+            yield repo
+        except Exception as e:
+            self.emitter.emit(Failed(duration=elapsed(), exit_code=_exit_code_of(e), logs=_logs_of(e)))
+            raise
+        else:
+            self.emitter.emit(Succeeded(duration=elapsed()))
+        finally:
+            watchdog.disarm()
+
+
 def repo_context(
     connection_choice: str | None,
     event_class: type[BasicEvent],
-    *,
     require_restic: bool = False,
-    **fields: typing.Any,
-) -> "typing.Iterator[Repository]":
+    **fields: t.Any,
+) -> t.ContextManager[Repository]:
     """Resolve a repository and report the operation's lifecycle around the block.
-
-    Yields the repository, so resolution and reporting are one construct:
 
         with repo_context(connection_choice, BackupEvent, target=target) as repo:
             repo.backup(c, verbose, target, message)
 
-    __enter__ emits `started` and arms the watchdog; __exit__ disarms it and emits `succeeded` or
-    `failed` -- phase chosen from the exception or its absence, duration from the elapsed time.
+    Entering emits `started` and arms the watchdog; leaving disarms it and emits `succeeded` or
+    `failed`, choosing the phase from the exception or its absence.
 
-    Resolution happens *inside*, so a mistyped --connection-choice is reported rather than
-    silently killing a cron job. There is no Repository yet at that point, so repo_display falls
-    back to the choice string.
-
-    The second argument is the operation class, which is all this needs: phases are universal, so
-    there is no family mapping to look up.
+    The second argument is the operation class, which is all this needs, since phases are universal.
     """
-    emitter = Emitter(event_class, None, connection_choice or "default", dict(fields))
-    started = time.monotonic()
-    watchdog = None
-
-    try:
-        repo = cli_repo(connection_choice, require_restic=require_restic)
-        emitter.repo = repo
-        emitter.repo_name = repo._short_name
-    except Exception as e:
-        emitter.emit(Failed(duration=time.monotonic() - started, exit_code=_exit_code_of(e), logs=str(e)))
-        raise
-
-    emitter.emit(Started())
-    watchdog = Watchdog(emitter, target=fields.get("target"))
-    watchdog.arm()
-
-    try:
-        yield repo
-    except Exception as e:
-        watchdog.disarm()
-        emitter.emit(Failed(duration=time.monotonic() - started, exit_code=_exit_code_of(e), logs=_logs_of(e)))
-        raise
-    else:
-        watchdog.disarm()
-        emitter.emit(Succeeded(duration=time.monotonic() - started))
+    return Operation(connection_choice, event_class, require_restic, **fields).run()
 
 
 def _exit_code_of(error: BaseException) -> int:
@@ -238,7 +261,7 @@ def backup(
         repo.backup(c, verbose, target, message)
 
     # if policy is available: execute forget after backing up:
-    # separate operation, separate event -- a backup that succeeded and a forget that failed are
+    # Separate operation, separate event: a backup that succeeded and a forget that failed are
     # different facts, and collapsing them would hide the second.
     if with_forget and (policy := repo.determine_forget_policy()):
         with repo_context(connection_choice, ForgetEvent, policy=policy.to_string()) as forget_repo:
@@ -313,7 +336,7 @@ def interactive(conn: Repository):
 
 @task(pre=[require_restic])
 @exits_on_restic_error
-def run(c, connection_choice: str = None, command: typing.Optional[str] = None):
+def run(c, connection_choice: str = None, command: t.Optional[str] = None):
     """
     This function prepares for restic and runs the input command until the user types "exit".
 
@@ -445,7 +468,7 @@ def unlock(c: Context, connection: str = None, remove_all: bool = False):
 def du(
     c: Context,
     connection: str = None,
-    mode: typing.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "raw-data",
+    mode: t.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "raw-data",
 ):
     """
     Retrieve and display statistics about the backup repository.
