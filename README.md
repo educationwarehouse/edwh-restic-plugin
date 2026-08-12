@@ -329,7 +329,12 @@ A failed backup is silent unless something reports it, which matters most when i
 plugins.
 
 Core ships **no** notifiers, only the interface, so no HTTP dependency is added to this package. A
-notifier is a separate pip-installable package.
+notifier is a separate pip-installable package:
+
+- [`edwh-restic-ntfy`](https://github.com/educationwarehouse/edwh-restic-ntfy) — [ntfy](https://ntfy.sh)
+  push notifications, with one url or a url per operation, phase, level or combination.
+
+Writing your own is one decorator and one `send`; see [Writing a notifier](#writing-a-notifier).
 
 ### Configuring channels
 
