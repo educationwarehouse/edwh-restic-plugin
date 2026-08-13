@@ -2,6 +2,17 @@
 
 <!--next-version-placeholder-->
 
+## v1.0.0 (2026-08-13)
+
+### Feature
+* **plugin:** add integrity checks, notifications, and extensible plugins
+
+### Fix
+* implement move for local+smtp; abstract method check function
+
+### Documentation
+* information about new plugin features
+
 ## v0.16.1 (2026-07-10)
 
 ### Fix

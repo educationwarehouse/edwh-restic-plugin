@@ -30,7 +30,7 @@ dependencies = [
     'typing-extensions',
     "ewok>=0.4.8",
 ]
-version = "0.16.1"
+version = "1.0.0"
 
 [project.optional-dependencies]
 dev = [
