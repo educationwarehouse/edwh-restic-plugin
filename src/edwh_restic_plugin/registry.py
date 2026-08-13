@@ -30,7 +30,6 @@ from typing_extensions import NotRequired
 
 from .config import read_config
 
-
 #: Bumped when a change breaks a plugin at runtime: a removed or renamed field, a changed method
 #: signature, a member dropped from the Event union. Adding an event operation does not bump it.
 CONTRACT_VERSION = 1

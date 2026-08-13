@@ -47,8 +47,8 @@ def exits_on_restic_error(fn: t.Callable[P, R]) -> t.Callable[P, R]:
 
 
 def cli_repo(
-    connection_choice: str = None,
-    restichostname: str = None,
+    connection_choice: str | None = None,
+    restichostname: str | None = None,
     require_restic: bool = False,
 ) -> Repository:
     """
@@ -105,7 +105,7 @@ def repo_context(
     return Operation(connection_choice, event_class, cli_repo, require_restic, **fields).run()
 
 
-@task(aliases=("notify-test", "test-notify"))
+@task(aliases=("test-notify",))
 @exits_on_restic_error
 def notify_test(
     _c: Context,
@@ -187,7 +187,7 @@ def require_restic(c):
 
 @task(aliases=("setup", "init"))
 @exits_on_restic_error
-def configure(c, connection_choice=None, restichostname=None):
+def configure(c, connection_choice: str | None = None, restichostname: str | None = None):
     """Setup or update the backup command for your environment.
     connection_choice: choose where you want to store the repo (local, SFTP, B2, swift)
     restichostname: which hostname to force for restic, or blank for default.
@@ -205,8 +205,8 @@ def configure(c, connection_choice=None, restichostname=None):
 def backup(
     c,
     target: str = "",
-    connection_choice: str = None,
-    message: str = None,
+    connection_choice: str | None = None,
+    message: str | None = None,
     verbose: bool = True,
     without_forget: bool = False,
 ):
@@ -254,7 +254,7 @@ def backup(
 
 @task
 @exits_on_restic_error
-def restore(c, connection_choice: str = None, snapshot: str = "latest", target: str = "", verbose: bool = True):
+def restore(c, connection_choice: str | None = None, snapshot: str = "latest", target: str = "", verbose: bool = True):
     """
     The restore function restores the latest backed-up files by default and puts them in a restore folder.
 
@@ -295,7 +295,7 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
 
 @task(iterable=["tag"], aliases=["list"])
 @exits_on_restic_error
-def snapshots(c, connection_choice: str = None, tag: list[str] = None, n: int = 1, verbose: bool = False):
+def snapshots(c, connection_choice: str | None = None, tag: list[str] | None = None, n: int = 1, verbose: bool = False):
     """
     With this you can see per repo which repo is made when and where, \
         the repo-id can be used at inv restore as an option
@@ -320,7 +320,7 @@ def interactive(conn: Repository):
 
 @task(pre=[require_restic])
 @exits_on_restic_error
-def run(c, connection_choice: str = None, command: t.Optional[str] = None):
+def run(c, connection_choice: str | None = None, command: t.Optional[str] = None):
     """
     This function prepares for restic and runs the input command until the user types "exit".
 
@@ -341,7 +341,7 @@ def run(c, connection_choice: str = None, command: t.Optional[str] = None):
 
 @task()
 @exits_on_restic_error
-def env(c, connection_choice: str = None):
+def env(c, connection_choice: str | None = None):
     """
 
     :type c: Context
@@ -359,7 +359,7 @@ def env(c, connection_choice: str = None):
 
 @task()
 @exits_on_restic_error
-def forget(c: Context, connection: str = None, policy: str = None, dry: bool = False):
+def forget(c: Context, connection: str | None = None, policy: str | None = None, dry: bool = False):
     """
     Run restic forget (with prune) based on a specific policy defined in a TOML configuration file.
 
@@ -400,14 +400,14 @@ def forget(c: Context, connection: str = None, policy: str = None, dry: bool = F
     with repo_context(connection, ForgetEvent, policy=policy) as repo:
         repo.forget(
             c,
-            policy=policy and ResticForgetPolicy.from_string(policy),
+            policy=ResticForgetPolicy.from_string(policy) if policy else None,
             dry=dry,
         )
 
 
 @task(aliases=("verify",))
 @exits_on_restic_error
-def check(c: Context, connection: str = None, read_data: bool = False, subset: str = ""):
+def check(c: Context, connection: str | None = None, read_data: bool = False, subset: str = ""):
     """Verify repository integrity.
 
     Silent repository corruption is the failure mode you otherwise discover during a restore,
@@ -430,7 +430,7 @@ def check(c: Context, connection: str = None, read_data: bool = False, subset: s
 
 @task()
 @exits_on_restic_error
-def unlock(c: Context, connection: str = None, remove_all: bool = False):
+def unlock(c: Context, connection: str | None = None, remove_all: bool = False):
     """
     Run restic unlock.
     """
@@ -451,7 +451,7 @@ def unlock(c: Context, connection: str = None, remove_all: bool = False):
 @exits_on_restic_error
 def du(
     c: Context,
-    connection: str = None,
+    connection: str | None = None,
     mode: t.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "raw-data",
 ):
     """
@@ -480,7 +480,7 @@ def du(
 
 @task()
 @exits_on_restic_error
-def wipe(c, connection: str = None):
+def wipe(c, connection: str | None = None):
     repo = cli_repo(connection)
     repo.prepare_env_for_restic(c)
 
@@ -535,12 +535,12 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
         check_target_files = c.run(
             f"{rclone} lsf -R --files-only {target}:{target_bucket} | wc -l", hide=True
         ).stdout.strip()
-        if int(check_target_files) > 0:
-            if not edwh.tasks.confirm(
-                f"There are {check_target_files} files in the target bucket. Continuing might overwrite them. Continue? [Yn] ",
-                default=True,
-            ):
-                return
+        if int(check_target_files) > 0 and not edwh.tasks.confirm(
+            f"There are {check_target_files} files in the target bucket. "
+            "Continuing might overwrite them. Continue? [Yn] ",
+            default=True,
+        ):
+            return
         params: str = ""
         if dry:
             params += "--dry-run"
@@ -567,12 +567,9 @@ def backup_env_variables(c: Context, full: bool = False):
         .stdout.strip()
         .split("\n")
     )
-    if not full:
-        grep_options = " | grep " + grep_options
-    else:
-        grep_options = ""
+    grep_options = " | grep " + grep_options if not full else ""
     for env_file in env_files:
-        if not home + "/.env" in env_file and home + "/." in env_file:
+        if home + "/.env" not in env_file and home + "/." in env_file:
             continue
         print(f"\n{env_file}\n")
         c.sudo(f"cat {env_file}{grep_options}")
@@ -580,7 +577,7 @@ def backup_env_variables(c: Context, full: bool = False):
 
 
 @task(aliases=("check-abstract-methods",))
-def check_abstract_methode(c: Context):
+def check_abstract_methode(_: Context):
     """Report repositories that cannot be instantiated because an abstract member is missing.
 
     Only setup, prepare_for_restic and uri are required. wipe, bucket and prepare_rclone_config

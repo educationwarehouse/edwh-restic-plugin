@@ -1,3 +1,4 @@
+import contextlib
 import shlex
 import types
 import typing as t
@@ -85,7 +86,7 @@ class ResticForgetPolicy:
         Raises:
             ValueError: If a required argument is missing or incorrectly formatted.
         """
-        options = {}
+        options: dict[str, t.Any] = {}
         parsed_args = shlex.split(" ".join(args))
         type_hints = t.get_type_hints(cls)
 
@@ -142,20 +143,19 @@ class ResticForgetPolicy:
 
         Args:
             subkey (str): The key under which the policy is stored in the TOML file.
-            toml_path (str | Path | None): The path to the TOML configuration file. Defaults to '.toml' in the current directory.
+            toml_path (str | Path | None): The path to the TOML configuration file. Defaults to
+                '.toml' in the current directory.
 
         Returns:
-            ResticForgetPolicy: An instance of ResticForgetPolicy created from the provided TOML file and key, or None if not found.
+            ResticForgetPolicy: An instance of ResticForgetPolicy created from the provided TOML
+                file and key, or None if not found.
 
         Raises:
             FileNotFoundError: If the specified TOML file does not exist.
             KeyError: If the specified subkey is not found in the TOML file.
         """
         # Set default toml_path if not provided
-        if toml_path is None:
-            toml_path = Path.cwd() / ".toml"
-        else:
-            toml_path = Path(toml_path)
+        toml_path = Path.cwd() / ".toml" if toml_path is None else Path(toml_path)
 
         try:
             data = tomlkit.parse(toml_path.read_text())
@@ -166,7 +166,7 @@ class ResticForgetPolicy:
         if not (section := (forget.get(subkey) or forget.get("default"))):
             return None
 
-        policy_dict = {}
+        policy_dict: dict[str, t.Any] = {}
         type_hints = t.get_type_hints(cls)
 
         for key, value in section.items():
@@ -177,10 +177,8 @@ class ResticForgetPolicy:
             if attr_type is bool:
                 policy_dict[snake_key] = bool(value)
             else:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     value = int(value)
-                except (ValueError, TypeError):
-                    pass  # If it's not a valid integer, leave it as is
                 policy_dict[snake_key] = value
 
         return cls(**policy_dict)
@@ -200,10 +198,7 @@ class ResticForgetPolicy:
         toml_path = Path(toml_path)
 
         # Read existing TOML data or create new if not exists
-        if toml_path.exists():
-            data = tomlkit.parse(toml_path.read_text())
-        else:
-            data = tomlkit.document()
+        data = tomlkit.parse(toml_path.read_text()) if toml_path.exists() else tomlkit.document()
 
         # Ensure 'restic' and 'forget' sections exist
         if "restic" not in data:
@@ -233,24 +228,20 @@ class ResticForgetPolicy:
 
         Args:
             subkey (str): The key under which the policy is stored in the TOML file.
-            toml_path (str | Path | None): The path to the TOML configuration file. Defaults to '.toml' in the current directory.
-            default_toml_path (str | Path | None): The path to the default TOML configuration file. Defaults to 'default.toml' in the same directory as toml_path.
+            toml_path (str | Path | None): The path to the TOML configuration file. Defaults to
+                '.toml' in the current directory.
+            default_toml_path (str | Path | None): The path to the default TOML configuration file.
+                Defaults to 'default.toml' in the same directory as toml_path.
 
         Returns:
             ResticForgetPolicy: An instance of ResticForgetPolicy created from the provided TOML file and key,
                                 or copied from the default TOML file, or None if not found.
         """
         # Ensure toml_path is a Path object
-        if toml_path is None:
-            toml_path = Path.cwd() / ".toml"
-        else:
-            toml_path = Path(toml_path)
+        toml_path = Path.cwd() / ".toml" if toml_path is None else Path(toml_path)
 
         # Set default_toml_path if not provided
-        if default_toml_path is None:
-            default_toml_path = toml_path.parent / "default.toml"
-        else:
-            default_toml_path = Path(default_toml_path)
+        default_toml_path = toml_path.parent / "default.toml" if default_toml_path is None else Path(default_toml_path)
 
         # Try to get the policy from the main TOML file
         policy = cls.from_toml_file(subkey, toml_path)
