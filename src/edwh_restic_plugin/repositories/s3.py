@@ -1,7 +1,8 @@
 import os
+import textwrap
 
 from edwh.helpers import generate_password
-from invoke import Context
+from ewok import Context
 from restic_reaper import S3Config, wipe_repository_sync
 
 from . import Repository, register
@@ -67,14 +68,16 @@ class S3Repository(Repository):
     def wipe(self, dry: bool = False):
         # assumes 'prepare_for_restic' was ran
         config = self.s3_wipe_config()
-        return wipe_repository_sync(**config, dry=dry)
+        return wipe_repository_sync(dry=dry, **config)  # ty: ignore[invalid-argument-type]
 
     def prepare_rclone_config(self):
         bucket = self.bucket
         endpoint = self.uri.removeprefix("s3:").removesuffix(f"/{bucket}").strip("/")
-        return f"""type = s3
-provider = Other
-access_key_id = {os.environ["AWS_ACCESS_KEY_ID"]}
-secret_access_key = {os.environ["AWS_SECRET_ACCESS_KEY"]}
-region = {os.environ.get("AWS_DEFAULT_REGION", "auto")}
-endpoint = {endpoint}"""
+        return textwrap.dedent(f"""
+            type = s3
+            provider = Other
+            access_key_id = {os.environ["AWS_ACCESS_KEY_ID"]}
+            secret_access_key = {os.environ["AWS_SECRET_ACCESS_KEY"]}
+            region = {os.environ.get("AWS_DEFAULT_REGION", "auto")}
+            endpoint = {endpoint}
+        """)

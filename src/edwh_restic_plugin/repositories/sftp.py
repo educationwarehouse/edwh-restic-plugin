@@ -1,4 +1,5 @@
 import os
+import textwrap
 
 from restic_reaper import SftpConfig, wipe_repository_sync
 
@@ -65,7 +66,7 @@ class SFTPRepository(Repository):
                 IdentityFile ~/romy.key
                 To save a new host in the ssh config file, go to ~/.ssh and edit the config file there.
                 For more information, read the ssh_config manual (man ssh_config)
-                """
+                """,
             )
 
     @property
@@ -81,12 +82,15 @@ class SFTPRepository(Repository):
 
     def prepare_rclone_config(self):
         env = self.env_config
-        return f"""type = sftp
-host = {env["SFTP_HOSTNAME"]}
-user = {env["SFTP_USERNAME"]}
-key_user_agent = true
-shell_type = unix
-"""
+        return textwrap.dedent(
+            f"""
+            type = sftp
+            host = {env["SFTP_HOSTNAME"]}
+            user = {env["SFTP_USERNAME"]}
+            key_user_agent = true
+            shell_type = unix
+        """,
+        )
 
     def wipe(self, dry: bool = False):
         env = self.env_config
@@ -97,4 +101,4 @@ shell_type = unix
             root=env["SFTP_NAME"],
         )
 
-        return wipe_repository_sync(**config, dry=dry)
+        return wipe_repository_sync(dry=dry, **config)  # ty: ignore[invalid-argument-type]

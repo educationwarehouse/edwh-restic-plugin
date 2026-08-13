@@ -1,14 +1,14 @@
 import os
 
 from edwh.helpers import generate_password
-from invoke import Context
+from ewok import Context
 
 from . import register
 from .s3 import S3Repository
 
 
 @register("oracle", priority=6)
-class OracleRepository(S3Repository):
+class OracleRepository(S3Repository):  # ty: ignore[unsupported-base]
     # https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/s3compatibleapi.htm
 
     def setup(self) -> None:

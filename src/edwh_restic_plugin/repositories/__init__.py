@@ -10,7 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 
 import invoke
-from invoke import Context
+from ewok import Context
 from invoke.exceptions import AuthFailure
 from termcolor import cprint
 from tqdm import tqdm
@@ -62,7 +62,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         raise NotImplementedError("Setup undefined")
 
     @abc.abstractmethod
-    def prepare_for_restic(self, c: Context) -> None:
+    def prepare_for_restic(self, c: Context, /) -> None:
         """No environment variables need to be defined for local"""
         # prepare_for_restic implementations should probably start with:
         # env = self.env_config
@@ -170,10 +170,10 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         key: str,
         default: str | None,
         comment: str,
-        prefix: str = None,
-        suffix: str = None,
-        postfix: str = None,
-        path: Path = None,
+        prefix: str | None = None,
+        suffix: str | None = None,
+        postfix: str | None = None,
+        path: Path | None = None,
     ):
         value = check_env(
             key=key,
@@ -195,7 +195,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
             return
 
         with contextlib.suppress(AuthFailure):
-            return c.sudo("restic self-update", hide=True, warn=True)
+            c.sudo("restic self-update", hide=True, warn=True)
 
     def configure(self, c: Context):
         """Configure the backup environment variables."""
@@ -223,7 +223,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         return " --exclude ".join(self._excluded)
 
     @staticmethod
-    def get_snapshot_from(stdout: str) -> str:
+    def get_snapshot_from(stdout: str) -> str | None:
         """
         Parses the stdout from a Restic command to extract the snapshot ID.
 
@@ -261,7 +261,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         target: str,
         verb: str,
         verbose: bool,
-        message: str = None,
+        message: str | None = None,
         snapshot: str = "latest",
     ):
         """
@@ -303,14 +303,15 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
             print(f"{file} output: " if verbose else "", file=sys.stderr)
             try:
-                ran_script: invoke.runners.Result = c.run(file, hide=not verbose, pty=True)
+                ran_script: invoke.runners.Result | None = c.run(file, hide=not verbose, pty=True)
                 file_codes.append(0)
             except invoke.exceptions.UnexpectedExit as e:
                 ran_script = e.result
                 file_codes.append(e.result.exited)
 
-            snapshot = self.get_snapshot_from(ran_script.stdout)
-            snapshots_created.append(snapshot)
+            assert ran_script is not None
+            snapshot_id = self.get_snapshot_from(ran_script.stdout)
+            snapshots_created.append(snapshot_id)
 
         # send message with backup. see message for more info
         # also if a tag in tags is None it will be removed by fix_tags
@@ -381,7 +382,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         c.run(f"restic {self.hostarg} -r {self.uri} check {depth}".strip())
 
-    def snapshot(self, c: Context, tags: list[str] = None, n: int = 2, verbose: bool = False):
+    def snapshot(self, c: Context, tags: list[str] | None = None, n: int = 2, verbose: bool = False):
         """
         a list of all the backups with a message
 
@@ -403,10 +404,13 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         if verbose:
             print("$", command, file=sys.stderr)
 
-        stdout = c.run(
+        result = c.run(
             command,
             hide=True,
-        ).stdout
+        )
+        if result is None:
+            return
+        stdout = result.stdout
 
         if verbose:
             print(stdout, file=sys.stderr)
@@ -432,11 +436,14 @@ class Repository(abc.ABC, metaclass=SortableMeta):
             if verbose:
                 print("$", command, file=sys.stderr)
 
-            restore_output = c.run(
+            restore_result = c.run(
                 command,
                 hide=True,
                 warn=True,
-            ).stdout
+            )
+            if restore_result is None:
+                continue
+            restore_output = restore_result.stdout
 
             if verbose:
                 print(restore_output, file=sys.stderr)

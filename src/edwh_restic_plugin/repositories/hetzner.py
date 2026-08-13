@@ -1,14 +1,14 @@
 import os
 
 from edwh.helpers import generate_password
-from invoke import Context
+from ewok import Context
 
 from . import register
 from .s3 import S3Repository
 
 
 @register("hetzner", priority=1)
-class HetznerRepository(S3Repository):
+class HetznerRepository(S3Repository):  # ty: ignore[unsupported-base]
     def setup(self) -> None:
         self.check_env(
             "HETZNER_BUCKET",
@@ -40,7 +40,6 @@ class HetznerRepository(S3Repository):
     def uri(self) -> str:
         env = self.env_config
         return "s3:{region}.your-objectstorage.com/{bucket}".format(
-            account_id=env.get("HETZNER_ACCOUNT_ID", "?"),
             region=env.get("HETZNER_REGION", "?"),
             bucket=self.bucket,
         )
