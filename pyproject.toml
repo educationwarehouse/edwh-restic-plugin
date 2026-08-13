@@ -4,7 +4,6 @@ build-backend = "hatchling.build"
 
 [project]
 name = "edwh-restic-plugin"
-dynamic = ["version"]
 description = ''
 readme = "README.md"
 requires-python = ">=3.12"
@@ -31,6 +30,7 @@ dependencies = [
     'typing-extensions',
     "ewok>=0.4.8",
 ]
+version = "0.16.1"
 
 [project.optional-dependencies]
 dev = [
@@ -47,9 +47,6 @@ restic = "edwh_restic_plugin.tasks"
 Documentation = "https://github.com/educationwarehouse/edwh-restic-plugin#readme"
 Issues = "https://github.com/educationwarehouse/edwh-restic-plugin/issues"
 Source = "https://github.com/educationwarehouse/edwh-restic-plugin"
-
-[tool.hatch.version]
-path = "src/edwh_restic_plugin/__about__.py"
 
 [tool.hatch.envs.default]
 dependencies = [
@@ -185,10 +182,48 @@ exclude = ["pytest"]
 # 'all':
 stop-after-first-failure = true
 
-[tool.semantic_release]
+[tool.vommit]
+allow_breaking_bang = true
+allow_breaking_footer = true
+prerelease_token = "beta"
+confirm = true
+
+[tool.vommit.git]
+enabled = true
+origin = "origin"
 branch = "main"
-version_variable = "src/edwh_restic_plugin/__about__.py:__version__"
-change_log = "CHANGELOG.md"
-upload_to_repository = false
-upload_to_release = false
-build_command = "hatch build"
+on_wrong_branch = "error"
+tag_format = "v{version}"
+commit_format = "{version}"
+
+[tool.vommit.changelog]
+enabled = true
+file = "CHANGELOG.md"
+include_prereleases = false
+placeholder = "<!--next-version-placeholder-->"
+placeholder_regex = "<auto>"
+entry_title_format = "## v{version} ({date:%Y-%m-%d})"
+
+[tool.vommit.changelog.levels]
+feat = "Feature{s}"
+fix = "Fix{es}"
+break = "Breaking Change{s}"
+docs = "Documentation"
+perf = "Performance"
+
+[tool.vommit.pypi]
+enabled = true
+use_keyring = true
+
+[tool.vommit.commands]
+clean = "rm -rf ./dist"
+build = "hatch build"
+publish = "uv publish"
+post_publish = ""
+
+[tool.vommit.version_bump_map]
+break = "major"
+feat = "minor"
+fix = "patch"
+perf = "patch"
+
