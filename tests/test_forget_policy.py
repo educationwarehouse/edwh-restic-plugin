@@ -225,3 +225,17 @@ def test_invalid_toml_file():
         toml_path.write_text("invalid content")
         with pytest.raises(ParseError):
             ResticForgetPolicy.from_toml_file("s4", str(toml_path))
+
+
+def test_pep604_annotations_still_coerce_ints():
+    """Regression test for the union-origin check.
+
+    from_string reads the dataclass annotations to decide whether to coerce a value to int. The
+    check only recognised typing.Union, so writing `int | None` instead of `Optional[int]` silently
+    turned keep_last into the string "5". Both spellings must work.
+    """
+    policy = ResticForgetPolicy.from_string("--keep-last", "5", "--keep-within", "7d")
+
+    assert policy.keep_last == 5
+    assert isinstance(policy.keep_last, int)
+    assert policy.keep_within == "7d"

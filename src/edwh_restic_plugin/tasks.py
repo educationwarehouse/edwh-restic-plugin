@@ -1,28 +1,62 @@
+import functools
 import json
 import os
 import subprocess
+import sys
 import tempfile
-import typing
+import typing as t
 from pathlib import Path
 
 import edwh.tasks
+import invoke
 from edwh import task
 from edwh.tasks import DOCKER_COMPOSE
 from ewok import Context
 from termcolor import cprint
 
 from .env import DOTENV, read_dotenv, set_env_value
+from .events import BackupEvent, BasicEvent, CheckEvent, ForgetEvent, RestoreEvent, WipeEvent
+from .exceptions import ResticError, UnsupportedOperation
 from .forget import ResticForgetPolicy
 from .helpers import _require_restic
+from .notify import Dispatcher, Operation, build_channels, build_test_event, event_names
 from .repositories import Repository, registrations
 from .restictypes import DockerContainer
 
+P = t.ParamSpec("P")
+R = t.TypeVar("R")
 
-def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repository:
+
+def exits_on_restic_error(fn: t.Callable[P, R]) -> t.Callable[P, R]:
+    """Turn a ResticError into a process exit code, at the outermost point that can.
+
+    Library code raises instead of calling sys.exit(), so callers can react to a failure: print
+    it, notify about it, clean up after it. Something still has to produce the exit code the CLI
+    contract promises, and a task is the only place that knows the process is ending.
+    """
+
+    @functools.wraps(fn)
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        try:
+            return fn(*args, **kwargs)
+        except ResticError as e:
+            cprint(str(e), color="red", file=sys.stderr)
+            sys.exit(e.exit_code)
+
+    return wrapper
+
+
+def cli_repo(
+    connection_choice: str | None = None,
+    restichostname: str | None = None,
+    require_restic: bool = False,
+) -> Repository:
     """
     Create a repository object and set up the connection to the backend.
     :param connection_choice: choose where you want to store the repo (local, SFTP, B2, swift)
     :param restichostname: which hostname to force for restic, or blank for default.
+    :param require_restic: install restic if missing. Off by default because it may prompt for
+        sudo and apt-install a package; `configure` opts in, since provisioning is its job.
     :return: repository object
     """
     env = read_dotenv(DOTENV)
@@ -47,8 +81,103 @@ def cli_repo(connection_choice: str = None, restichostname: str = None) -> Repos
 
     print("Use connection: ", connection_lowercase)
     repo = repoclass()
+    if require_restic:
+        repo._require_restic()
     repo.setup()
     return repo
+
+
+def repo_context(
+    connection_choice: str | None,
+    event_class: type[BasicEvent],
+    require_restic: bool = False,
+    **fields: t.Any,
+) -> t.ContextManager[Repository]:
+    """Run an operation against a repository, reporting its lifecycle.
+
+        with repo_context(connection_choice, BackupEvent, target=target) as repo:
+            repo.backup(c, verbose, target, message)
+
+    Entering emits `started` and arms the watchdog; leaving disarms it and emits `succeeded` or
+    `failed`. The second argument is the operation class, which is all this needs since phases are
+    universal.
+    """
+    return Operation(connection_choice, event_class, cli_repo, require_restic, **fields).run()
+
+
+@task(aliases=("test-notify",))
+@exits_on_restic_error
+def notify_test(
+    _c: Context,
+    event: str = "backup.failed",
+    connection: str | None = None,
+    channel: str | None = None,
+    force: bool = False,
+    all_events: bool = False,
+):
+    """Send a synthetic event to your real notifiers, so you can try them without breaking a backup.
+
+    Events are marked NOTIFY-TEST in the fields a channel is likely to display, because a drill that
+    looks identical to a genuine 3am alert is worse than no drill.
+
+    Args:
+        _c (Context)
+        event (str): which `<operation>.<phase>` to send. Use --all-events for every one.
+        connection (str, optional): resolve this repository so events carry its real display name.
+            Left out, they say "no repository resolved" instead of touching a backend.
+        channel (str, optional): only send to this channel, instead of all configured ones.
+        force (bool): send even to channels whose `events` or `min_level` would filter it out.
+            Use this to prove a channel works at all, separately from whether your routing is right.
+        all_events (bool): send every `<operation>.<phase>` in turn.
+    """
+    channels = build_channels()
+    if channel:
+        channels = [ch for ch in channels if ch.notifier._short_name == channel]
+        if not channels:
+            configured = ", ".join(sorted(ch.notifier._short_name for ch in build_channels())) or "none"
+            raise ResticError(f"no active channel named {channel!r}; configured: {configured}")
+
+    if not channels:
+        raise ResticError(
+            "no channels are active. Name them in [restic.notify] channels, and check their credentials are in .env."
+        )
+
+    repo_display = None
+    if connection:
+        # Resolving is opt-in: the point of this task is to exercise notifiers, and it should work
+        # on a machine where the backend is unreachable.
+        repo_display = cli_repo(connection).display_name
+
+    names = event_names() if all_events else [event]
+    dispatcher = Dispatcher(channels)
+    delivered = 0
+
+    for name in names:
+        built = build_test_event(name, repo_display)
+        wanted = [ch for ch in channels if ch.wants(built)]
+        skipped = [ch for ch in channels if ch not in wanted]
+
+        for ch in skipped:
+            # Reported rather than silent: "nothing arrived" otherwise looks like a broken plugin
+            # when it is really the routing doing its job.
+            cprint(
+                f"{name}: skipping '{ch.notifier._short_name}' (filtered by events/min_level)"
+                + ("; sending anyway because --force" if force else ""),
+                color="yellow",
+            )
+
+        targets = channels if force else wanted
+        for ch in targets:
+            cprint(f"{name} -> {ch.notifier._short_name}", color="blue")
+            dispatcher.send_to(ch, built)
+            delivered += 1
+
+    if not delivered:
+        raise ResticError(
+            "nothing was delivered: every channel filtered these events out. Re-run with --force to bypass routing."
+        )
+
+    cprint(f"\ndelivered {delivered} event(s). Nothing was backed up, restored or deleted.", color="green")
 
 
 @task
@@ -57,7 +186,8 @@ def require_restic(c):
 
 
 @task(aliases=("setup", "init"))
-def configure(c, connection_choice=None, restichostname=None):
+@exits_on_restic_error
+def configure(c, connection_choice: str | None = None, restichostname: str | None = None):
     """Setup or update the backup command for your environment.
     connection_choice: choose where you want to store the repo (local, SFTP, B2, swift)
     restichostname: which hostname to force for restic, or blank for default.
@@ -66,15 +196,17 @@ def configure(c, connection_choice=None, restichostname=None):
     # It has been decided to create a main path called 'backups' for each repository.
     # This can be changed or removed if desired.
     # A password is only passed with a few functions.
-    cli_repo(connection_choice, restichostname).configure(c)
+    # require_restic: this is the provisioning task, so it is the one that may install restic.
+    cli_repo(connection_choice, restichostname, require_restic=True).configure(c)
 
 
 @task
+@exits_on_restic_error
 def backup(
     c,
     target: str = "",
-    connection_choice: str = None,
-    message: str = None,
+    connection_choice: str | None = None,
+    message: str | None = None,
     verbose: bool = True,
     without_forget: bool = False,
 ):
@@ -109,16 +241,20 @@ def backup(
     # a file called 'foo' (optionally having a given header, no wildcards for the file name supported).
     # --exclude-larger-than 'size', Specified once to excludes files larger than the given size.
     # Please see 'restic help backup' for more specific information about each exclude option.
-    repo = cli_repo(connection_choice)
-    repo.backup(c, verbose, target, message)
+    with repo_context(connection_choice, BackupEvent, target=target or None, message=message) as repo:
+        repo.backup(c, verbose, target, message)
 
     # if policy is available: execute forget after backing up:
+    # Separate operation, separate event: a backup that succeeded and a forget that failed are
+    # different facts, and collapsing them would hide the second.
     if with_forget and (policy := repo.determine_forget_policy()):
-        repo.forget(c, policy)
+        with repo_context(connection_choice, ForgetEvent, policy=policy.to_string()) as forget_repo:
+            forget_repo.forget(c, policy)
 
 
 @task
-def restore(c, connection_choice: str = None, snapshot: str = "latest", target: str = "", verbose: bool = True):
+@exits_on_restic_error
+def restore(c, connection_choice: str | None = None, snapshot: str = "latest", target: str = "", verbose: bool = True):
     """
     The restore function restores the latest backed-up files by default and puts them in a restore folder.
 
@@ -152,12 +288,14 @@ def restore(c, connection_choice: str = None, snapshot: str = "latest", target: 
         for volume_name in volumes_to_remove:
             c.run(f"docker volume rm {volume_name}")
 
-    cli_repo(connection_choice).restore(c, verbose, target, snapshot)
-    # print("`inv up` to restart the services.")
+    with repo_context(connection_choice, RestoreEvent, target=target or None, snapshot=snapshot) as repo:
+        repo.restore(c, verbose, target, snapshot)
+    # print("`edwh up` to restart the services.")
 
 
 @task(iterable=["tag"], aliases=["list"])
-def snapshots(c, connection_choice: str = None, tag: list[str] = None, n: int = 1, verbose: bool = False):
+@exits_on_restic_error
+def snapshots(c, connection_choice: str | None = None, tag: list[str] | None = None, n: int = 1, verbose: bool = False):
     """
     With this you can see per repo which repo is made when and where, \
         the repo-id can be used at inv restore as an option
@@ -181,7 +319,8 @@ def interactive(conn: Repository):
 
 
 @task(pre=[require_restic])
-def run(c, connection_choice: str = None, command: typing.Optional[str] = None):
+@exits_on_restic_error
+def run(c, connection_choice: str | None = None, command: t.Optional[str] = None):
     """
     This function prepares for restic and runs the input command until the user types "exit".
 
@@ -201,7 +340,8 @@ def run(c, connection_choice: str = None, command: typing.Optional[str] = None):
 
 
 @task()
-def env(c, connection_choice: str = None):
+@exits_on_restic_error
+def env(c, connection_choice: str | None = None):
     """
 
     :type c: Context
@@ -218,7 +358,8 @@ def env(c, connection_choice: str = None):
 
 
 @task()
-def forget(c: Context, connection: str = None, policy: str = None, dry: bool = False):
+@exits_on_restic_error
+def forget(c: Context, connection: str | None = None, policy: str | None = None, dry: bool = False):
     """
     Run restic forget (with prune) based on a specific policy defined in a TOML configuration file.
 
@@ -256,17 +397,40 @@ def forget(c: Context, connection: str = None, policy: str = None, dry: bool = F
         https://restic.readthedocs.io/en/latest/060_forget.html#removing-snapshots-according-to-a-policy
     """
 
-    repo = cli_repo(connection)
+    with repo_context(connection, ForgetEvent, policy=policy) as repo:
+        repo.forget(
+            c,
+            policy=ResticForgetPolicy.from_string(policy) if policy else None,
+            dry=dry,
+        )
 
-    repo.forget(
-        c,
-        policy=policy and ResticForgetPolicy.from_string(policy),
-        dry=dry,
-    )
+
+@task(aliases=("verify",))
+@exits_on_restic_error
+def check(c: Context, connection: str | None = None, read_data: bool = False, subset: str = ""):
+    """Verify repository integrity.
+
+    Silent repository corruption is the failure mode you otherwise discover during a restore,
+    which makes this the most valuable thing to run on a schedule.
+
+    Structure only by default. `--read-data` re-reads every byte, which is thorough but pays full
+    egress on a cloud backend every run; `--subset=5%` (or `1G`, or `2/8`) reads a sample, and
+    restic picks a different one each time, so repeated runs converge on full coverage without
+    ever paying for it at once.
+
+    Args:
+        c (Context)
+        connection (str, optional): repository to check; defaults to the .env-derived one.
+        read_data (bool): read and verify every pack file.
+        subset (str): read a subset, e.g. "5%", "1G" or "2/8". Ignored if read_data is set.
+    """
+    with repo_context(connection, CheckEvent, read_data=read_data, subset=subset) as repo:
+        repo.check(c, read_data=read_data, subset=subset)
 
 
 @task()
-def unlock(c: Context, connection: str = None, remove_all: bool = False):
+@exits_on_restic_error
+def unlock(c: Context, connection: str | None = None, remove_all: bool = False):
     """
     Run restic unlock.
     """
@@ -284,10 +448,11 @@ def unlock(c: Context, connection: str = None, remove_all: bool = False):
 
 
 @task(aliases=("stats", "stat"))
+@exits_on_restic_error
 def du(
     c: Context,
-    connection: str = None,
-    mode: typing.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "raw-data",
+    connection: str | None = None,
+    mode: t.Literal["restore-size", "file-by-contents", "blobs-per-file", "raw-data"] = "raw-data",
 ):
     """
     Retrieve and display statistics about the backup repository.
@@ -314,19 +479,27 @@ def du(
 
 
 @task()
-def wipe(c, connection: str = None):
+@exits_on_restic_error
+def wipe(c, connection: str | None = None):
     repo = cli_repo(connection)
     repo.prepare_env_for_restic(c)
 
+    # Confirm before entering repo_context: declining is not an operation that started, so it must
+    # not emit wipe.started followed by nothing.
     confirmation = input(f"Type YES to wipe repository {repo!r}: ").strip()
     if confirmation != "YES":
         print("Aborted wipe operation.")
         return
 
-    print(repo.wipe())
+    try:
+        with repo_context(connection, WipeEvent) as wipe_repo:
+            print(wipe_repo.wipe())
+    except UnsupportedOperation as e:
+        cprint(str(e), color="yellow")
 
 
 @task()
+@exits_on_restic_error
 def move(c: Context, source: str = "", target: str = "", dry: bool = False):
     """Moves everything from source bucket to target bucket
     Args:
@@ -341,28 +514,37 @@ def move(c: Context, source: str = "", target: str = "", dry: bool = False):
     source_repo.prepare_env_for_restic(c)
     target_repo = cli_repo(target)
     target_repo.prepare_env_for_restic(c)
+
+    # Fail before touching anything: move needs rclone config and a bucket name from *both*
+    # repositories, and a backend that cannot provide them should say so rather than half-run.
+    try:
+        source_config, target_config = source_repo.prepare_rclone_config(), target_repo.prepare_rclone_config()
+        source_bucket, target_bucket = source_repo.bucket, target_repo.bucket
+    except UnsupportedOperation as e:
+        return cprint(str(e), color="yellow")
+
     with tempfile.TemporaryDirectory() as rclone:
         rclone_config = Path(rclone) / "rclone.config"
         rclone_config.write_text(f"""[{source}]
-{source_repo.prepare_rclone_config()}
+{source_config}
 
 [{target}]
-{target_repo.prepare_rclone_config()}""")
+{target_config}""")
 
         rclone = f"rclone --config {rclone_config}"
         check_target_files = c.run(
-            f"{rclone} lsf -R --files-only {target}:{target_repo.bucket} | wc -l", hide=True
+            f"{rclone} lsf -R --files-only {target}:{target_bucket} | wc -l", hide=True
         ).stdout.strip()
-        if int(check_target_files) > 0:
-            if not edwh.tasks.confirm(
-                f"There are {check_target_files} files in the target bucket. Continuing might overwrite them. Continue? [Yn] ",
-                default=True,
-            ):
-                return
+        if int(check_target_files) > 0 and not edwh.tasks.confirm(
+            f"There are {check_target_files} files in the target bucket. "
+            "Continuing might overwrite them. Continue? [Yn] ",
+            default=True,
+        ):
+            return
         params: str = ""
         if dry:
             params += "--dry-run"
-        c.run(f"{rclone} sync {source}:{source_repo.bucket} {target}:{target_repo.bucket} {params}")
+        c.run(f"{rclone} sync {source}:{source_bucket} {target}:{target_bucket} {params}")
 
 
 @task(pre=[edwh.tasks.require_sudo])
@@ -385,22 +567,32 @@ def backup_env_variables(c: Context, full: bool = False):
         .stdout.strip()
         .split("\n")
     )
-    if not full:
-        grep_options = " | grep " + grep_options
-    else:
-        grep_options = ""
+    grep_options = " | grep " + grep_options if not full else ""
     for env_file in env_files:
-        if not home + "/.env" in env_file and home + "/." in env_file:
+        if home + "/.env" not in env_file and home + "/." in env_file:
             continue
         print(f"\n{env_file}\n")
         c.sudo(f"cat {env_file}{grep_options}")
     print("\n")
 
 
-@task()
-def check_abstract_methode(c: Context):
+@task(aliases=("check-abstract-methods",))
+def check_abstract_methode(_: Context):
+    """Report repositories that cannot be instantiated because an abstract member is missing.
+
+    Only setup, prepare_for_restic and uri are required. wipe, bucket and prepare_rclone_config
+    are optional and degrade at the point of use, so a repository lacking them is fine here.
+    """
+    missing = False
     for repository_class in registrations:
         try:
-            x = repository_class()
+            repository_class()
         except TypeError as e:
+            missing = True
             cprint(f"Repository missing abstract methode(s): {repository_class.__name__} \n {e}", color="red")
+
+    if not missing:
+        cprint(
+            f"All {len(registrations.to_ordered_dict())} repositories implement setup, prepare_for_restic and uri.",
+            color="green",
+        )

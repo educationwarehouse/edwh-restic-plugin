@@ -1,7 +1,8 @@
 import os
+import textwrap
 
 from edwh.helpers import generate_password
-from invoke import Context
+from ewok import Context
 from restic_reaper import LocalConfig, wipe_repository_sync
 
 from . import Repository, register
@@ -52,13 +53,11 @@ class LocalRepository(Repository):
         return self.env_config["LOCAL_NAME"]
 
     def prepare_rclone_config(self):
-        return """type = local
-nounc = True
-"""
+        return textwrap.dedent("""
+            type = local
+            nounc = True
+        """)
 
     def wipe(self, dry: bool = False):
-        config = LocalConfig(
-            root=self.env_config["LOCAL_NAME"],
-        )
-
-        return wipe_repository_sync(**config, dry=dry)
+        config: LocalConfig = {"root": self.env_config["LOCAL_NAME"]}
+        return wipe_repository_sync(dry=dry, **config)  # ty: ignore[invalid-argument-type]

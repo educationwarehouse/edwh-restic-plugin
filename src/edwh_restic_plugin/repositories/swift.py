@@ -1,6 +1,7 @@
 import os
+import textwrap
 
-from invoke import Context
+from ewok import Context
 from restic_reaper import SwiftConfig, wipe_repository_sync
 
 from . import Repository, register
@@ -105,6 +106,7 @@ class SwiftRepository(Repository):
 
     def wipe(self, dry: bool = False):
         env = self.env_config
+
         config = SwiftConfig(
             container=env["OS_CONTAINERNAME"],
             auth_url=env["OS_AUTH_URL"],
@@ -116,15 +118,18 @@ class SwiftRepository(Repository):
             password=env["OS_PASSWORD"],
             root=env["OS_NAME"],
         )
-        return wipe_repository_sync(**config, dry=dry)
+
+        return wipe_repository_sync(dry=dry, **config)  # ty: ignore[invalid-argument-type]
 
     def prepare_rclone_config(self) -> str:
         env = self.env_config
-        return f"""type = swift
-    user = {env["OS_USERNAME"]}
-    key = {env["OS_PASSWORD"]}
-    auth = {env["OS_AUTH_URL"]}
-    domain = {env["OS_PROJECT_DOMAIN_NAME"]}
-    tenant = {env["OS_PROJECT_NAME"]}
-    tenant_domain = {env["OS_PROJECT_DOMAIN_NAME"]}
-    region = {env["OS_REGION_NAME"]}"""
+        return textwrap.dedent(f"""
+            type = swift
+            user = {env["OS_USERNAME"]}
+            key = {env["OS_PASSWORD"]}
+            auth = {env["OS_AUTH_URL"]}
+            domain = {env["OS_PROJECT_DOMAIN_NAME"]}
+            tenant = {env["OS_PROJECT_NAME"]}
+            tenant_domain = {env["OS_PROJECT_DOMAIN_NAME"]}
+            region = {env["OS_REGION_NAME"]}
+        """)
