@@ -3,7 +3,8 @@
 [![PyPI - Version](https://img.shields.io/pypi/v/edwh-restic-plugin.svg)](https://pypi.org/project/edwh-restic-plugin)
 [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/edwh-restic-plugin.svg)](https://pypi.org/project/edwh-restic-plugin)
 
-`edwh-restic-plugin` adds `restic.*` subcommands to `edwh` for repository setup, backup/restore flows, retention, and maintenance.
+`edwh-restic-plugin` adds `restic.*` subcommands to `edwh` for repository setup, backup/restore flows, retention, and
+maintenance.
 
 ## Table of contents
 
@@ -14,6 +15,9 @@
 - [Commands](#commands)
 - [Forget policy integration](#forget-policy-integration)
 - [Wipe (destructive)](#wipe-destructive)
+- [Integrity checks](#integrity-checks)
+- [Notifications](#notifications)
+- [Custom repository types](#custom-repository-types)
 - [License](#license)
 
 ## Installation
@@ -63,7 +67,8 @@ The plugin supports multiple backends through provider implementations in `src/e
 - `oracle`
 - `hetzner`
 
-If you omit connection selection, the plugin auto-detects based on configured `*_PASSWORD` variables and repository priority.
+If you omit connection selection, the plugin auto-detects based on configured `*_PASSWORD` variables and repository
+priority.
 
 ## Captain hooks scripts
 
@@ -292,11 +297,61 @@ edwh restic.wipe --connection s3
 Behavior:
 
 - The command asks for explicit confirmation:
-  - `Type YES to wipe repository <...>:`
+    - `Type YES to wipe repository <...>:`
 - Any response other than `YES` aborts the operation.
 - S3-style backends share the generic wipe helper; other providers still implement their own config.
 
 Use this only when you intentionally want to remove a repository's backup contents.
+
+## Integrity checks
+
+`restic.check` verifies that the repository itself is intact, which is otherwise something you find
+out during a restore.
+
+```console
+edwh restic.check --connection s3               # structure only, cheap
+edwh restic.check --connection s3 --subset 5%   # also read a 5% sample of the data
+edwh restic.check --connection s3 --read-data   # read every byte (slow, full egress)
+```
+
+Options:
+
+- `--connection`: repository to check; defaults to the one derived from `.env`.
+- `--read-data`: verify every pack file. Re-downloads the whole repository, so on a cloud backend
+  it pays full egress every run.
+- `--subset`: read a sample instead (`5%`, `1G`, `2/8`). Percent and size subsets are random;
+  `n/t` selects a specific part. Repeated random subsets trend toward broad coverage without
+  paying for it at once. Ignored when `--read-data` is set.
+
+Aliases: `restic.verify`.
+
+## Notifications
+
+Lifecycle operations emit events (`backup.failed`, `check.failed`, `backup.slow`, ...) that
+notifier plugins can route to channels like ntfy or Discord. Core ships no notifiers; each is a
+separate pip-installable package. Secrets go in `.env`, routing goes in `default.toml`/`.toml`:
+
+```toml
+[restic.notify]
+channels = ["ntfy"]            # REQUIRED: nothing is sent unless a channel is named here
+
+[restic.notify.ntfy]
+topic = "acme-backups"         # plugin-specific options
+events = ["backup.failed", "check.failed"]
+```
+
+`edwh restic.notify-test` sends a synthetic event to your real channels to verify the wiring.
+
+See [docs/notifications.md](docs/notifications.md) for the full configuration reference, the event
+catalog, and how to write your own notifier.
+
+## Custom repository types
+
+Add a restic-supported backend this package does not ship by subclassing `Repository` and
+registering it. Three members are required: `setup`, `prepare_for_restic`, and `uri`.
+
+See [docs/custom-repositories.md](docs/custom-repositories.md) for a full example, optional
+`restic.wipe`/`restic.move` support, and discovery through entry points or `.toml`.
 
 ## License
 
