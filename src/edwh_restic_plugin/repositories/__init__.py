@@ -1,29 +1,27 @@
 import abc
 import contextlib
 import datetime
-import heapq
-import importlib
-import importlib.util
 import io
 import os
 import re
 import sys
-import typing
-from collections import OrderedDict, defaultdict
+import typing as t
+from collections import defaultdict
 from pathlib import Path
 
 import invoke
-from invoke import Context
+from ewok import Context
 from invoke.exceptions import AuthFailure
 from termcolor import cprint
 from tqdm import tqdm
-from typing_extensions import NotRequired
 
 from ..env import DOTENV, check_env, read_dotenv
+from ..exceptions import NoScriptsFound, ResticScriptError, ScriptFailure, UnsupportedOperation
 from ..forget import ResticForgetPolicy
 from ..helpers import _require_restic, camel_to_snake, fix_tags
+from ..registry import Registration, Registry
 
-if typing.TYPE_CHECKING:
+if t.TYPE_CHECKING:
     from restic_reaper import WipeOutcome
 
 # the path where the restic command is going to be executed
@@ -38,10 +36,10 @@ class SortableMeta(abc.ABCMeta):
     The class can then be included simply for lookup, not for any sorting purposes.
     """
 
-    def __lt__(self, other: typing.Any) -> bool:
+    def __lt__(self, other: t.Any) -> bool:
         return False
 
-    def __gt__(self, other: typing.Any) -> bool:
+    def __gt__(self, other: t.Any) -> bool:
         return False
 
 
@@ -64,7 +62,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         raise NotImplementedError("Setup undefined")
 
     @abc.abstractmethod
-    def prepare_for_restic(self, c: Context) -> None:
+    def prepare_for_restic(self, c: Context, /) -> None:
         """No environment variables need to be defined for local"""
         # prepare_for_restic implementations should probably start with:
         # env = self.env_config
@@ -78,23 +76,34 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         """Return the prefix required for restic to indicate the protocol, for example sftp:hostname:"""
         raise NotImplementedError("Prefix unknown in base class")
 
-    @abc.abstractmethod
-    def wipe(self, dry: bool = False) -> "WipeOutcome":
-        raise NotImplementedError("Implement provider-specific wipe logic")
-
-    @property
-    @abc.abstractmethod
-    def bucket(self):
-        return NotImplementedError("Implement bucket name from env to return")
-
-    @abc.abstractmethod
-    def prepare_rclone_config(self) -> str:
-        raise NotImplementedError("Implement provider-specific rclone config logic")
-
     ###########################
     # END OF NOT IMPLEMENTED, #
     #    START BASE CLASS:    #
     ###########################
+
+    #####################################
+    # OPTIONAL: override to support      #
+    # `wipe` and `move` for your backend #
+    #####################################
+
+    # Only setup, prepare_for_restic and uri are needed to perform a backup. These three exist for
+    # the `wipe` and `move` tasks, so they degrade at the point of use rather than forcing every
+    # third-party repository to implement operations it may never need.
+
+    def wipe(self, dry: bool = False) -> "WipeOutcome":  # noqa: ARG002 (signature is the contract)
+        raise UnsupportedOperation(self.display_name, "wipe")
+
+    @property
+    def bucket(self) -> str:
+        raise UnsupportedOperation(self.display_name, "bucket (needed by move)")
+
+    def prepare_rclone_config(self) -> str:
+        raise UnsupportedOperation(self.display_name, "move (no rclone config)")
+
+    @property
+    def display_name(self) -> str:
+        """Identifier safe to put in a notification; override to add detail, never returning `uri`."""
+        return self._short_name
 
     def _add_missing_boilerpalte_restic_vars(self):
         """
@@ -139,11 +148,15 @@ class Repository(abc.ABC, metaclass=SortableMeta):
     env_config: dict[str, str]
 
     def _require_restic(self):
+        """Install restic if it is missing. May prompt for sudo, so callers opt in.
+
+        Deliberately not called from __init__, which would let merely constructing a repository
+        prompt for a password and install a package. Ask for it via cli_repo(require_restic=True).
+        """
         _require_restic()
 
     def __init__(self, env_path: Path = DOTENV) -> None:
         super().__init__()
-        self._require_restic()
         env_path.touch(exist_ok=True)
         print("start repo init", self.__class__.__name__)
         self._env_path = env_path
@@ -157,10 +170,10 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         key: str,
         default: str | None,
         comment: str,
-        prefix: str = None,
-        suffix: str = None,
-        postfix: str = None,
-        path: Path = None,
+        prefix: str | None = None,
+        suffix: str | None = None,
+        postfix: str | None = None,
+        path: Path | None = None,
     ):
         value = check_env(
             key=key,
@@ -182,7 +195,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
             return
 
         with contextlib.suppress(AuthFailure):
-            return c.sudo("restic self-update", hide=True, warn=True)
+            c.sudo("restic self-update", hide=True, warn=True)
 
     def configure(self, c: Context):
         """Configure the backup environment variables."""
@@ -210,7 +223,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         return " --exclude ".join(self._excluded)
 
     @staticmethod
-    def get_snapshot_from(stdout: str) -> str:
+    def get_snapshot_from(stdout: str) -> str | None:
         """
         Parses the stdout from a Restic command to extract the snapshot ID.
 
@@ -238,8 +251,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         files = [str(file) for file in DEFAULT_BACKUP_FOLDER.glob(f"{verb}_{target}*")]
         # check if no files are found
         if not files:
-            print("no files found with target:", target)
-            sys.exit(255)
+            raise NoScriptsFound(verb, target, DEFAULT_BACKUP_FOLDER)
 
         return files
 
@@ -249,7 +261,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         target: str,
         verb: str,
         verbose: bool,
-        message: str = None,
+        message: str | None = None,
         snapshot: str = "latest",
     ):
         """
@@ -291,14 +303,15 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
             print(f"{file} output: " if verbose else "", file=sys.stderr)
             try:
-                ran_script: invoke.runners.Result = c.run(file, hide=not verbose, pty=True)
+                ran_script: invoke.runners.Result | None = c.run(file, hide=not verbose, pty=True)
                 file_codes.append(0)
             except invoke.exceptions.UnexpectedExit as e:
                 ran_script = e.result
                 file_codes.append(e.result.exited)
 
-            snapshot = self.get_snapshot_from(ran_script.stdout)
-            snapshots_created.append(snapshot)
+            assert ran_script is not None
+            snapshot_id = self.get_snapshot_from(ran_script.stdout)
+            snapshots_created.append(snapshot_id)
 
         # send message with backup. see message for more info
         # also if a tag in tags is None it will be removed by fix_tags
@@ -318,10 +331,16 @@ class Repository(abc.ABC, metaclass=SortableMeta):
             else:
                 cprint(f"[failure ({status_code})] {filename}", color="red")
 
-        if worst_status_code := max(file_codes) > 0:
-            exit(worst_status_code)
+        # note the parens: `worst := max(...) > 0` would bind the comparison, not the code,
+        # so every failure used to exit 1 regardless of what the script actually returned.
+        if failures := [
+            ScriptFailure(script=filename, exit_code=status_code)
+            for filename, status_code in zip(files, file_codes)
+            if status_code != 0
+        ]:
+            raise ResticScriptError(failures)
 
-    def backup(self, c, verbose: bool, target: str, message: str | None):
+    def backup(self, c: Context, verbose: bool, target: str, message: str | None):
         """
         Backs up the specified target.
 
@@ -333,7 +352,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         """
         self.execute_files(c, target, "backup", verbose, message)
 
-    def restore(self, c, verbose: bool, target: str, snapshot: str = "latest"):
+    def restore(self, c: Context, verbose: bool, target: str, snapshot: str = "latest"):
         """
         Restores the specified target using the specified snapshot or the latest if None is given.
 
@@ -345,14 +364,25 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         """
         self.execute_files(c, target, "restore", verbose, snapshot=snapshot)
 
-    def check(self, c):
-        """
-        Checks the integrity of the backup repository.
+    def check(self, c: Context, read_data: bool = False, subset: str = "") -> None:
+        """Check the integrity of the backup repository. Structure only unless asked for more.
+
+        Args:
+            read_data: read and verify every pack file. Thorough, but re-downloads everything.
+            subset: read a subset only, e.g. "5%", "1G" or "2/8". Ignored when read_data is set.
         """
         self.prepare_env_for_restic(c)
-        c.run(f"restic {self.hostarg} -r {self.uri} check --read-data")
 
-    def snapshot(self, c: Context, tags: list[str] = None, n: int = 2, verbose: bool = False):
+        if read_data:
+            depth = "--read-data"
+        elif subset:
+            depth = f"--read-data-subset={subset}"
+        else:
+            depth = ""
+
+        c.run(f"restic {self.hostarg} -r {self.uri} check {depth}".strip())
+
+    def snapshot(self, c: Context, tags: list[str] | None = None, n: int = 2, verbose: bool = False):
         """
         a list of all the backups with a message
 
@@ -374,10 +404,13 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         if verbose:
             print("$", command, file=sys.stderr)
 
-        stdout = c.run(
+        result = c.run(
             command,
             hide=True,
-        ).stdout
+        )
+        if result is None:
+            return
+        stdout = result.stdout
 
         if verbose:
             print(stdout, file=sys.stderr)
@@ -403,11 +436,14 @@ class Repository(abc.ABC, metaclass=SortableMeta):
             if verbose:
                 print("$", command, file=sys.stderr)
 
-            restore_output = c.run(
+            restore_result = c.run(
                 command,
                 hide=True,
                 warn=True,
-            ).stdout
+            )
+            if restore_result is None:
+                continue
+            restore_output = restore_result.stdout
 
             if verbose:
                 print(restore_output, file=sys.stderr)
@@ -420,7 +456,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         print(stdout)
 
-    def determine_forget_policy(self) -> typing.Optional[ResticForgetPolicy]:
+    def determine_forget_policy(self) -> t.Optional[ResticForgetPolicy]:
         for option in (
             self._short_name,
             *self._aliases,
@@ -431,7 +467,7 @@ class Repository(abc.ABC, metaclass=SortableMeta):
 
         return None
 
-    def forget(self, c: Context, policy: typing.Optional[ResticForgetPolicy] = None, dry: bool = False) -> None:
+    def forget(self, c: Context, policy: t.Optional[ResticForgetPolicy] = None, dry: bool = False) -> None:
         """
         Prepare environment and execute restic forget command.
 
@@ -468,86 +504,27 @@ class Repository(abc.ABC, metaclass=SortableMeta):
         return False
 
 
-class RepositoryRegistration(typing.TypedDict):
-    short_name: str
-    aliases: NotRequired[tuple[str, ...]]
-    priority: NotRequired[int]
-
-
-class RepositoryRegistrations:
-    def __init__(self) -> None:
-        # _queue is for internal use by heapq only!
-        # external api should use .queue !!!
-        self._queue: list[tuple[int, typing.Type[Repository], RepositoryRegistration]] = []
-        # aliases stores a reference for each name to the Repo class
-        self._aliases: dict[str, typing.Type[Repository]] = {}
-
-    def push(self, repo: typing.Type[Repository], settings: RepositoryRegistration):
-        priority = settings.get("priority", -1)
-        if priority < 0:
-            priority = sys.maxsize - priority  # very high int
-
-        heapq.heappush(self._queue, (priority, repo, settings))
-        self._aliases[settings["short_name"]] = repo
-        for alias in settings.get("aliases", []):
-            self._aliases[alias] = repo
-
-    @property
-    def queue(self):
-        if not self._queue:
-            self._find_items()
-
-        return self._queue
-
-    def clear(self):
-        self._queue = []
-        self._aliases = {}
-
-    def get(self, name: str) -> typing.Type[Repository] | None:
-        return self._aliases.get(name)
-
-    def to_sorted_list(self):
-        # No need for sorting here; heapq maintains the heap property
-        return list(self)
-
-    def to_ordered_dict(self) -> OrderedDict[str, typing.Type[Repository]]:
-        ordered_dict = OrderedDict()
-        for _, item, settings in self.queue:
-            ordered_dict[settings["short_name"]] = item
-        return ordered_dict
-
-    def __iter__(self) -> typing.Generator[typing.Type[Repository], None, None]:
-        return (item[1] for item in self.queue)
-
-    def __bool__(self):
-        return bool(self.queue)
-
-    def _find_items(self) -> None:
-        # import all registrations in this folder, so @register adds them to _queue
-        package_path = Path(__file__).resolve().parent
-
-        for file_path in package_path.glob("*.py"):
-            pkg = file_path.stem
-            if not pkg.startswith("__"):
-                importlib.import_module(f".{pkg}", package=__name__)
+class RepositoryRegistrations(Registry[Repository]):
+    in_package = __name__  # this package's *.py files, i.e. local.py, s3.py, ...
+    config_key = "repositories"
 
 
 def register(
-    short_name: typing.Optional[str] = None,
+    short_name: t.Optional[str] = None,
     aliases: tuple[str, ...] = (),
     priority: int = -1,
-    # **settings: Unpack[RepositoryRegistration] # <- not really supported yet!
-) -> typing.Callable[[typing.Type[Repository]], typing.Type[Repository]]:
+    # **settings: Unpack[Registration] # <- not really supported yet!
+) -> t.Callable[[t.Type[Repository]], t.Type[Repository]]:
     if isinstance(short_name, type):
         raise SyntaxError("Please call @register() with parentheses!")
 
-    def wraps(cls: typing.Type[Repository]) -> typing.Type[Repository]:
+    def wraps(cls: t.Type[Repository]) -> t.Type[Repository]:
         if not (isinstance(cls, type) and issubclass(cls, Repository)):
             raise TypeError(f"Decorated class {cls} must be a subclass of Repository!")
 
         name_or_derived = short_name or camel_to_snake(cls.__name__).removesuffix("_repository")
 
-        settings: RepositoryRegistration = {
+        settings: Registration = {
             "short_name": name_or_derived,
             "aliases": aliases,
             "priority": priority,

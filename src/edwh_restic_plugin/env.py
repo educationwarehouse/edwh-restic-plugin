@@ -75,7 +75,7 @@ def set_env_value(path: Path, target: str, value: str) -> None:
             # remove empty lines
             continue
         # convert to tuples
-        key, oldvalue = line.split("=", 1)
+        key, _oldvalue = line.split("=", 1)
         # clean the key and value
         key = key.strip()
         if key == target:
@@ -98,10 +98,10 @@ def check_env(
     key: str,
     default: str | None,
     comment: str,
-    prefix: str = None,
-    suffix: str = None,
-    postfix: str = None,
-    path: Path = None,
+    prefix: str | None = None,
+    suffix: str | None = None,
+    postfix: str | None = None,
+    path: Path | None = None,
 ):
     """
     Test if key is in .env file path, appends prompted or default value if missing.

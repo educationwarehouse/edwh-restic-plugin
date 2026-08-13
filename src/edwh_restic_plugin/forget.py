@@ -1,8 +1,9 @@
+import contextlib
 import shlex
-import typing
+import types
+import typing as t
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Optional, Self, get_type_hints
 
 import tomlkit
 
@@ -13,35 +14,35 @@ class ResticForgetPolicy:
     Represents a policy for forgetting backups using restic, with various retention options.
 
     Attributes:
-        keep_last (Optional[int]): Number of latest snapshots to keep.
-        keep_hourly (Optional[int]): Number of hourly snapshots to keep.
-        keep_daily (Optional[int]): Number of daily snapshots to keep.
-        keep_weekly (Optional[int]): Number of weekly snapshots to keep.
-        keep_monthly (Optional[int]): Number of monthly snapshots to keep.
-        keep_yearly (Optional[int]): Number of yearly snapshots to keep.
+        keep_last (int | None): Number of latest snapshots to keep.
+        keep_hourly (int | None): Number of hourly snapshots to keep.
+        keep_daily (int | None): Number of daily snapshots to keep.
+        keep_weekly (int | None): Number of weekly snapshots to keep.
+        keep_monthly (int | None): Number of monthly snapshots to keep.
+        keep_yearly (int | None): Number of yearly snapshots to keep.
         keep_tag (list[str]): List of tags for which to apply the retention policy.
-        keep_within (Optional[str]): Retention period within which to keep snapshots.
-        keep_within_hourly (Optional[str]): Hourly retention period within which to keep snapshots.
-        keep_within_daily (Optional[str]): Daily retention period within which to keep snapshots.
-        keep_within_weekly (Optional[str]): Weekly retention period within which to keep snapshots.
-        keep_within_monthly (Optional[str]): Monthly retention period within which to keep snapshots.
-        keep_within_yearly (Optional[str]): Yearly retention period within which to keep snapshots.
+        keep_within (str | None): Retention period within which to keep snapshots.
+        keep_within_hourly (str | None): Hourly retention period within which to keep snapshots.
+        keep_within_daily (str | None): Daily retention period within which to keep snapshots.
+        keep_within_weekly (str | None): Weekly retention period within which to keep snapshots.
+        keep_within_monthly (str | None): Monthly retention period within which to keep snapshots.
+        keep_within_yearly (str | None): Yearly retention period within which to keep snapshots.
         prune (bool): Whether to purge old snapshots. Default is True.
     """
 
-    keep_last: Optional[int] = None
-    keep_hourly: Optional[int] = None
-    keep_daily: Optional[int] = None
-    keep_weekly: Optional[int] = None
-    keep_monthly: Optional[int] = None
-    keep_yearly: Optional[int] = None
+    keep_last: int | None = None
+    keep_hourly: int | None = None
+    keep_daily: int | None = None
+    keep_weekly: int | None = None
+    keep_monthly: int | None = None
+    keep_yearly: int | None = None
     keep_tag: list[str] = field(default_factory=list)
-    keep_within: Optional[str] = None
-    keep_within_hourly: Optional[str] = None
-    keep_within_daily: Optional[str] = None
-    keep_within_weekly: Optional[str] = None
-    keep_within_monthly: Optional[str] = None
-    keep_within_yearly: Optional[str] = None
+    keep_within: str | None = None
+    keep_within_hourly: str | None = None
+    keep_within_daily: str | None = None
+    keep_within_weekly: str | None = None
+    keep_within_monthly: str | None = None
+    keep_within_yearly: str | None = None
     prune: bool = False
     dry_run: bool = False
 
@@ -72,7 +73,7 @@ class ResticForgetPolicy:
         return " ".join(args)
 
     @classmethod
-    def from_string(cls, *args: str) -> Self:
+    def from_string(cls, *args: str) -> t.Self:
         """
         Creates a policy instance from a string of restic command line arguments.
 
@@ -85,9 +86,9 @@ class ResticForgetPolicy:
         Raises:
             ValueError: If a required argument is missing or incorrectly formatted.
         """
-        options = {}
+        options: dict[str, t.Any] = {}
         parsed_args = shlex.split(" ".join(args))
-        type_hints = get_type_hints(cls)
+        type_hints = t.get_type_hints(cls)
 
         iterator = iter(parsed_args)
         for arg in iterator:
@@ -120,11 +121,12 @@ class ResticForgetPolicy:
                 key = key.replace("-", "_")
                 attr_type = type_hints.get(key, str)
 
-                # Determine if the attribute type is an integer or optional integer
-                origin = typing.get_origin(attr_type)
-                if origin is typing.Union:
-                    if int in typing.get_args(attr_type):
-                        options[key] = int(value)
+                # Coerce to int where the annotation allows one, else keep the string. The union
+                # branch used to store nothing at all when int was not among the args, which
+                # silently dropped every `str | None` option such as --keep-within.
+                origin = t.get_origin(attr_type)
+                if origin in (t.Union, types.UnionType):
+                    options[key] = int(value) if int in t.get_args(attr_type) else value
                 elif origin is list:
                     options.setdefault(key, []).append(value)
                 elif attr_type is int:
@@ -135,26 +137,25 @@ class ResticForgetPolicy:
         return cls(**options)
 
     @classmethod
-    def from_toml_file(cls, subkey: str = "default", toml_path: Optional[str | Path] = None) -> Optional[Self]:
+    def from_toml_file(cls, subkey: str = "default", toml_path: str | Path | None = None) -> t.Self | None:
         """
         Creates a policy instance from a TOML file.
 
         Args:
             subkey (str): The key under which the policy is stored in the TOML file.
-            toml_path (Optional[str | Path]): The path to the TOML configuration file. Defaults to '.toml' in the current directory.
+            toml_path (str | Path | None): The path to the TOML configuration file. Defaults to
+                '.toml' in the current directory.
 
         Returns:
-            ResticForgetPolicy: An instance of ResticForgetPolicy created from the provided TOML file and key, or None if not found.
+            ResticForgetPolicy: An instance of ResticForgetPolicy created from the provided TOML
+                file and key, or None if not found.
 
         Raises:
             FileNotFoundError: If the specified TOML file does not exist.
             KeyError: If the specified subkey is not found in the TOML file.
         """
         # Set default toml_path if not provided
-        if toml_path is None:
-            toml_path = Path.cwd() / ".toml"
-        else:
-            toml_path = Path(toml_path)
+        toml_path = Path.cwd() / ".toml" if toml_path is None else Path(toml_path)
 
         try:
             data = tomlkit.parse(toml_path.read_text())
@@ -165,8 +166,8 @@ class ResticForgetPolicy:
         if not (section := (forget.get(subkey) or forget.get("default"))):
             return None
 
-        policy_dict = {}
-        type_hints = get_type_hints(cls)
+        policy_dict: dict[str, t.Any] = {}
+        type_hints = t.get_type_hints(cls)
 
         for key, value in section.items():
             # Convert keys to snake_case
@@ -176,10 +177,8 @@ class ResticForgetPolicy:
             if attr_type is bool:
                 policy_dict[snake_key] = bool(value)
             else:
-                try:
+                with contextlib.suppress(ValueError, TypeError):
                     value = int(value)
-                except (ValueError, TypeError):
-                    pass  # If it's not a valid integer, leave it as is
                 policy_dict[snake_key] = value
 
         return cls(**policy_dict)
@@ -199,10 +198,7 @@ class ResticForgetPolicy:
         toml_path = Path(toml_path)
 
         # Read existing TOML data or create new if not exists
-        if toml_path.exists():
-            data = tomlkit.parse(toml_path.read_text())
-        else:
-            data = tomlkit.document()
+        data = tomlkit.parse(toml_path.read_text()) if toml_path.exists() else tomlkit.document()
 
         # Ensure 'restic' and 'forget' sections exist
         if "restic" not in data:
@@ -225,31 +221,27 @@ class ResticForgetPolicy:
 
     @classmethod
     def get_or_copy_policy(
-        cls, subkey: str, toml_path: Optional[str | Path] = None, default_toml_path: Optional[str | Path] = None
-    ) -> Optional[Self]:
+        cls, subkey: str, toml_path: str | Path | None = None, default_toml_path: str | Path | None = None
+    ) -> t.Self | None:
         """
         Retrieves a policy from the TOML file or copies it from the default TOML file if not present.
 
         Args:
             subkey (str): The key under which the policy is stored in the TOML file.
-            toml_path (Optional[str | Path]): The path to the TOML configuration file. Defaults to '.toml' in the current directory.
-            default_toml_path (Optional[str | Path]): The path to the default TOML configuration file. Defaults to 'default.toml' in the same directory as toml_path.
+            toml_path (str | Path | None): The path to the TOML configuration file. Defaults to
+                '.toml' in the current directory.
+            default_toml_path (str | Path | None): The path to the default TOML configuration file.
+                Defaults to 'default.toml' in the same directory as toml_path.
 
         Returns:
             ResticForgetPolicy: An instance of ResticForgetPolicy created from the provided TOML file and key,
                                 or copied from the default TOML file, or None if not found.
         """
         # Ensure toml_path is a Path object
-        if toml_path is None:
-            toml_path = Path.cwd() / ".toml"
-        else:
-            toml_path = Path(toml_path)
+        toml_path = Path.cwd() / ".toml" if toml_path is None else Path(toml_path)
 
         # Set default_toml_path if not provided
-        if default_toml_path is None:
-            default_toml_path = toml_path.parent / "default.toml"
-        else:
-            default_toml_path = Path(default_toml_path)
+        default_toml_path = toml_path.parent / "default.toml" if default_toml_path is None else Path(default_toml_path)
 
         # Try to get the policy from the main TOML file
         policy = cls.from_toml_file(subkey, toml_path)
