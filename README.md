@@ -435,13 +435,18 @@ from typing import Any, Mapping, Self
 
 import requests
 from edwh_restic_plugin.plugins import (
-    BackupEvent, CheckEvent, Event, Failed, Notifier, register_notifier,
+    BackupEvent,
+    CheckEvent,
+    Event,
+    Failed,
+    Notifier,
+    register_notifier,
 )
 
 
 @register_notifier("mywebhook")
 class MyWebhook(Notifier):
-    contract = 1        # the contract version you wrote against, as a literal
+    contract = 1  # the contract version you wrote against, as a literal
 
     def __init__(self, url: str, secret: str) -> None:
         self.url = url
@@ -449,10 +454,10 @@ class MyWebhook(Notifier):
 
     @classmethod
     def from_config(cls, env: Mapping[str, str], options: Mapping[str, Any]) -> Self | None:
-        url = options.get("webhook_url")            # from [restic.notify.mywebhook]
-        secret = env.get("MYWEBHOOK_SECRET")        # from .env, MYWEBHOOK_* only
+        url = options.get("webhook_url")  # from [restic.notify.mywebhook]
+        secret = env.get("MYWEBHOOK_SECRET")  # from .env, MYWEBHOOK_* only
         if not (url and secret):
-            return None                             # named but unprovisioned -> inactive
+            return None  # named but unprovisioned -> inactive
         return cls(url, secret)
 
     def format(self, event: Event) -> str:

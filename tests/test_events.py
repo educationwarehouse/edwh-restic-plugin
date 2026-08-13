@@ -6,13 +6,13 @@ import pytest
 
 from src.edwh_restic_plugin.events import (
     ALL_PHASES,
-    Phase,
     BackupEvent,
     BasicEvent,
     CheckEvent,
     Event,
     Failed,
     ForgetEvent,
+    Phase,
     Slow,
     Started,
     Succeeded,
